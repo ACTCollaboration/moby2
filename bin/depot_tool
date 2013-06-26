@@ -1,0 +1,142 @@
+#!/usr/bin/python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+usage="""%prog [opts] args...
+
+This program is for inspecting and archiving results stored in a
+depot.  Its primary use is for scanning a large result (such as a full
+season of cuts) to check for or extract only the results for a few
+TODs.
+
+To count items in a cuts tag, for example, run:
+
+   %prog scan /path/to/depot/tag_name
+
+To reconcile against a list of TODs, run:
+
+   %prog scan /path/to/depot/tag_name --tod-list my_tods.txt
+
+If your basenames are not in the first column of my_tods.txt, use the
+--column option.  To export the tag to a zipfile, so you can transfer
+and install it elsewhere, use the "export" command:
+
+   %prog export /path/to/depot/tag_name --tod-list my_tods.txt tag_name.zip
+
+"""
+
+import moby2
+from moby2.analysis import beam_ana
+
+import os, sys, glob
+
+import subprocess as sp
+
+def zip_files(archive_path, base_tree, filenames, verbose=False):
+    args = ['/usr/bin/zip', archive_name] + filenames
+    P = sp.Popen(args, cwd=base_tree, stdout=sp.PIPE, stderr=sp.PIPE)
+    out, err = P.communicate()
+    if verbose:
+        'Output from %s' % args[0]
+        print(out, err)
+    return P.returncode
+
+profiles = [
+    {'name': 'cuts',
+     'pattern': '{tag}/{first_five}/{tod_name}.cuts',
+     'glob': '{tag}/*/*.cuts',
+     },
+    {'name': 'todcal',
+     'pattern': '{tag}/{first_five}/{tod_name}.cal',
+     'glob': '{tag}/*/*.cal',
+     },
+    {'name': 'time_constants',
+     'pattern': '{tag}/{first_five}/{tod_name}.tau',
+     'glob': '{tag}/*/*.tau',
+     },
+]
+profiles_dict = dict([(x['name'], x) for x in profiles])
+
+
+#
+# Command line
+#
+import optparse as o
+o = o.OptionParser(usage="")
+o.add_option('-l', '--tod-list')
+o.add_option('-c', '--column', type=int, default=0)
+o.add_option('--profile')
+o.add_option('--verbose', action='store_true')
+opts, args = o.parse_args()
+
+CMD = args[0]
+if CMD == 'scan':
+    tag_path = args[1]
+elif CMD == 'export':
+    tag_path = args[1]
+    zipfile = args[2]
+else:
+    o.error('Expected command from: scan,export.')
+
+depot_dir, tag = os.path.split(tag_path)
+
+#
+# Use the profile information (or scan for all profiles) to find files
+# in the tag.
+#
+if opts.profile is None:
+    profiles_to_scan = [p['name'] for p in profiles]
+else:
+    profiles_to_scan = [opts.profile]
+
+match_sets = []
+for p in profiles_to_scan:
+    p = profiles_dict[p]
+    matches = glob.glob(os.path.join(depot_dir, p['glob'].format(tag=tag)))
+    match_sets.append((len(matches), p, matches))
+match_sets.sort()
+n, p, matches = match_sets[0]
+if n > 0:
+    print('Looks like this is a tag for "%s"' % p['name'])
+    opts.profile = p['name']
+else:
+    print('Could not find any files that match profiles.')
+    o.exit(0)
+
+#
+# If we have a TOD list, reconcile against the found items.
+#
+if opts.tod_list:
+    tod_names = moby2.util.ascii.read_columns(opts.tod_list)[opts.column]
+    tod_names = [beam_ana.util.extract_basename(x) for x in tod_names]
+    not_found = []
+    list_matched, list_unmatched = [], [x for x in matches]
+    for name in tod_names:
+        fullname = os.path.join(depot_dir, p['pattern'].format(
+                tag=tag, first_five=name[:5], tod_name=name))
+        if fullname in list_unmatched:
+            list_unmatched.remove(fullname)
+            list_matched.append(fullname)
+        else:
+            not_found.append(name)
+    print('TOD list item count:          %6i' % len(tod_names))
+    print('  ..matched in tag:           %6i' % len(list_matched))
+    print('  ..not matched in tag:       %6i' % len(not_found))
+    print('Depot tag item count:         %6i' % len(not_found))
+    print('  ..not matched in TOD list:  %6i' % len(list_unmatched))
+    print()
+    working_items = list_matched
+else:
+    # Just use everything we found.
+    print('Depot tag item count:         %6i' % len(matches))
+    working_items = matches
+
+if CMD == 'scan':
+    pass
+elif CMD == 'export':
+    archive_name = os.path.join(os.getcwd(), zipfile)
+    # Strip depot name from those paths.
+    rel_items = ['./'+w[len(depot_dir):] for w in working_items]
+    print(zip_files(archive_name, depot_dir, rel_items,
+                    verbose=opts.verbose))

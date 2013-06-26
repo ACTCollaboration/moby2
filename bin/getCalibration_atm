@@ -1,0 +1,52 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+import moby2, os, sys
+import numpy as np
+from moby2.analysis.pathologies import Pathologies
+
+params = moby2.util.MobyDict.from_file( sys.argv[1] )
+depot = moby2.util.Depot(params.get('depot'))
+stable = moby2.util.MobyDict.from_file(params.get("stable_dets"))
+srow = np.array(stable.get("row"))
+scol = np.array(stable.get("col"))
+cutParams = moby2.util.MobyDict.from_file(params["cutParams"])
+
+obsnames = []
+f = open(params['todList'])
+for l in f:
+    if l[0] != '#':
+        obsnames.append(l.split('\n')[0].split()[0])
+
+f.close()
+tod = moby2.TOD.from_dirfile(obsnames[0], read_data = False, end = -1000)
+rows, cols = tod.info.array_data.get_property( ['row','col'], det_uid = tod.det_uid)
+stableSel = np.zeros(len(tod.det_uid), dtype = bool)
+for d in range(len(srow)):
+    stableSel[(rows==srow[d])*(cols==scol[d])] = True
+
+ffObj = moby2.detectors.RelCal.from_dict(params.get("flatfield"))
+_, ffRMS = ffObj.get_property('calRMS', det_uid = tod.det_uid, default=1.)
+
+for obs in obsnames:
+    print("Calibrating %s"%(obs.split("/")[-1]))
+    try:
+        if not(depot.check_result(Pathologies, tod = obs, tag = params['tag_patho'])): 
+            print("Failed")
+            continue
+        tod = moby2.TOD.from_dirfile(obs, read_data = False, end = -1000)
+        pa = depot.read_result(Pathologies, tod = tod, tag = params['tag_patho'])
+        pa.makeNewSelections(flatfield = params["flatfield"], params = cutParams.get("pathologyParams"))
+        resp, ff = pa.getpWCalibration(calDict = params["flatfield"])
+        gains = pa.crit["gainLive"]["values"]
+        level = np.mean(gains[stableSel*pa.liveSel])
+        calib = resp*ff*level/gains
+        for c in params.get("inverted"):
+            calib[cols == c] *= -1
+        s = pa.calSel
+        calObj = moby2.detectors.Calibration(det_uid = pa.dets[s])
+        calObj.set_property(["cal", "calRMS"], [calib[s], ffRMS[s]])
+        depot.write_result(calObj, params.get("tag_cal"), tod = tod, force = params["force"])
+    except:
+        print("Failed")

@@ -1,0 +1,21 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+import sys
+
+filename = sys.argv[1]
+N = sys.argv[2]
+
+f = open(filename, 'r')
+
+for i in range(int(N)):
+    f.seek(0)
+    ext = filename.split('.')[-1]
+    n = len(ext)+1
+    fn = '%s_%02d%s'%(filename[:-n],i,filename[-n:])
+    fo = open(fn, 'w')
+    for l in f:
+        fo.write(l.replace('??','%02d'%i))
+    fo.close()
+f.close()

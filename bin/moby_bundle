@@ -1,0 +1,217 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+USAGE = """%prog [options] DEST_FILE  SRC_ARGS ...
+
+Pack a directory of results into a moby2 HDF5 archive.
+
+For example:
+
+  ./moby_bundle output_file.h5 /path/to/depot/Calibration/ mr1_pa1_s13
+
+If the script can't guess the output "profile" (cuts or cal), provide
+it through --profile=... .
+
+"""
+
+import moby2
+import os, glob
+
+class CutsConverter:
+    def __init__(self, cfile, src_depot, profile=None):
+        self.archive = moby2.tod.flags.TODFlagsArchive(cfile, 'w', do_init=True)
+        self.src_depot = src_depot
+        if profile is None:
+            profile = []
+        self.profile = profile
+        self.cuts_compiled = {}
+
+    def convert_one(self, tod_id, force=False, test=False, upgrade=False, group=None):
+        if not in_group(tod_id, group):
+            return False
+        if self.archive.has_item(tod_id):
+            if test:
+                _upgrade = False
+                try:
+                    f = self.archive.get_item(tod_id)
+                except Exception as e:
+                    print('Failed to load!')
+                    if not upgrade:
+                        raise e
+                    else:
+                        _upgrade = True
+                if _upgrade:
+                    print('Upgrading.')
+                    target = self.archive.target[tod_id]
+                    target.attrs['_moby2_class_name'] = 'tod_flags'
+                    target.attrs['_moby2_class_version'] = 1
+                    
+            if not force:
+                return False
+        # Load them...
+        cuts = {}
+        ref_cut = None
+        for entry in self.profile:
+            if entry[0] == 'derived':
+                continue
+            oname, iname = entry[1:]
+            cutp = {
+                'structure': '{tag}/{first_five}/{tod_name}.cuts',
+                'depot': self.src_depot, 'tag': iname}
+            try:
+                cuts[oname] = moby2.scripting.get_cuts(cutp, tod=tod_id)
+            except IOError as e:
+                if entry[0][-1] == '?':
+                    cuts[oname] = None
+                else:
+                    raise e
+            if entry[0][-1] == '*':
+                ref_cut = cuts[oname]
+        # Merge them.
+        sc = moby2.tod.TODFlags.for_cuts(ref_cut)
+        for entry in self.profile:
+            if entry[0].startswith('raw'):
+                oname, iname = entry[1], entry[2]
+                sc.add_base_flag(oname, data=cuts[oname], make_copy=False)
+            elif entry[0] == 'derived':
+                oname, list1, list2 = entry[1:]
+                sc.add_derived_flag(oname, list1, list2)
+        self.archive.set_item(tod_id, sc, clobber=force)
+        return True
+
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        self.archive.close()
+
+class CalibrationConverter:
+    def __init__(self, cfile, src_depot, tag):
+        self.archive = moby2.detectors.CalibrationArchive(cfile, 'w')
+        self.src_depot = src_depot
+        self.profile = tag
+
+    def convert_one(self, tod_id, force=False, group=None):
+        if not in_group(tod_id, group):
+            return False
+        if not force and self.archive.has_item(tod_id):
+            return False
+        # Load them...
+        ref_cut = None
+        calp = {'type': 'depot_cal',
+                'structure': '{tag}/{first_five}/{tod_name}.cal',
+                'depot': self.src_depot, 'tag': self.profile}
+        cal = moby2.scripting.get_calibration(calp, tod=tod_id)
+        self.archive.set_item(tod_id, cal, clobber=force)
+        return True
+
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        self.archive.close()
+
+
+def pack_standard_cuts(output_file, base_path, base_tag, **kwargs):
+    cc = CutsConverter(output_file, base_path)
+    cc.profile.extend(
+        [['raw*', 'map', '%s' % base_tag],
+         ['raw?', 'planet', '%s_planet' % base_tag],
+         ['raw', 'glitch', '%s_partial' % base_tag],
+         ['derived', 'cmb', ['map', 'planet'], []]]
+    )
+    tod_list = glob.glob('%s/%s/*/*.cuts' % (base_path, base_tag))
+    tod_list = sorted([os.path.split(x)[1][:-5] for x in tod_list])
+    for tod_id in tod_list:
+        print(tod_id)
+        cc.convert_one(tod_id, **kwargs)
+    
+def pack_planet_cuts(output_file, base_path, base_tag, **kwargs):
+    cc = CutsConverter(output_file, base_path)
+    cc.profile.extend(
+        [['raw*', 'map',    'tod1_%s' % base_tag],
+         ['raw?', 'planet', 'pos_%s' % base_tag],
+         ['derived', 'cmb', ['map', 'planet'], []]]
+    )
+    tod_list = glob.glob('%s/tod1_%s/*/*.cuts' % (base_path, base_tag))
+    tod_list = sorted([os.path.split(x)[1][:-5] for x in tod_list])
+    for tod_id in tod_list:
+        print(tod_id)
+        cc.convert_one(tod_id, **kwargs)
+    
+def pack_standard_cal(output_file, base_path, base_tag, **kwargs):
+    cc = CalibrationConverter(output_file, base_path, base_tag)
+    tod_list = glob.glob('%s/%s/*/*.cal' % (base_path, base_tag))
+    tod_list = sorted([os.path.split(x)[1][:-4] for x in tod_list])
+    for tod_id in tod_list:
+        print(tod_id)
+        cc.convert_one(tod_id, **kwargs)
+    
+## For example:
+# pack_standard_cuts('test_cuts.h5',
+#                    '/home/mfh2/actpol_depots/lmaurin/TODCuts',
+#                    'mr3_pa2_s14')
+#    
+# pack_standard_cal('test_cal.h5',
+#                   '/home/mfh2/actpol_depots/lmaurin/Calibration',
+#                   'mr3_pa2_s14')
+
+import hashlib
+def in_group(tod_id, group_opts):
+    """Returns true if tod_id is in the group specified by group_opts.
+    This works by assigning a pseudo-random integer to each tod_id,
+    using a hash function (here md5).
+    """
+    if group_opts is None or group_opts[0] is None:
+        return True
+    hashval = int(hashlib.md5(tod_id).hexdigest()[:7], 16)
+    return hashval % group_opts[0] == group_opts[1]
+
+if __name__ == '__main__':
+    import optparse as o
+    o = o.OptionParser(usage=USAGE)
+    o.add_option('--profile', help="What kind of conversion to do.")
+    o.add_option('--group', type=int, nargs=2, default=None,
+                 help="n_groups group_index")
+    o.add_option('--zip', type=int)
+    o.add_option('--force', action='store_true')
+    opts, args = o.parse_args()
+
+    assert(len(args) >= 2)
+
+    output_file, source_dir, tag = args
+
+    if opts.profile is None:
+        probly_cuts = 'cuts' in source_dir.lower()
+        probly_cal = 'cal' in source_dir.lower()
+        if probly_cuts and not probly_cal:
+            opts.profile = 'cuts'
+        elif probly_cal and not probly_cuts:
+            opts.profile = 'cal'
+        else:
+            o.error('Could not guess profiles... specify --profile cuts|cal.')
+
+    if opts.zip is not None:
+        if 'cuts' in opts.profile:
+            aclass = moby2.tod.flags.TODFlagsArchive
+        else:
+            aclass = moby2.detectors.CalibrationArchive
+
+        # Combine grouped files.  Use generic re-archiver.
+        source_files = [output_file + '.%03i' % i for i in range(opts.zip)]
+        with aclass(output_file, 'w', do_init=True) as archive:
+            archive.join_from(source_files, delete_when_empty=False)
+        o.exit(0)
+
+    if opts.group is not None:
+        output_file = output_file + '.%03i' % opts.group[1]
+
+    if opts.profile == 'cuts':
+        pack_standard_cuts(output_file, source_dir, tag,
+                           force=opts.force, group=opts.group)
+    elif opts.profile == 'pcuts':
+        pack_planet_cuts(output_file, source_dir, tag,
+                         force=opts.force, group=opts.group)
+    elif opts.profile == 'cal':
+        pack_standard_cal(output_file, source_dir, tag,
+                          force=opts.force, group=opts.group)

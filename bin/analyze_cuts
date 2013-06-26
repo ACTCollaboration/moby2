@@ -1,0 +1,88 @@
+#!/bin/env python                                                                        
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+import numpy as np
+import sys, os
+import moby2
+from matplotlib import pyplot as plt
+from moby2.scripting.pathologies_tools import pathoList
+import pickle
+from scipy.stats import scoreatpercentile
+
+color="b"
+binfactor = 25
+
+params = moby2.util.MobyDict.from_file(sys.argv[1])
+cutsStats = os.path.join(params.get('outdir'), params.get('report')+'.db')
+todList = params.get('source_scans')
+
+ctag = os.path.basename(cutsStats).split(".")[0]
+ttag = os.path.basename(todList).split(".")[0]
+tag = "%s_%s"%(ctag,ttag)
+
+pl = pathoList(cutsStats)
+pl.removeDuplicates()
+# sel = pl.selectFromTODList(todList)                                                    
+# pl.applySelection(sel)                                                                 
+try:
+    pl.addPWV2results()
+    pwv = True
+except:
+    pwv = False
+    print("No PWV data available")
+pl.addEphem()
+
+pl.reportStatistics(filename = os.path.join(
+    params.get('dirstats','.'), "%s.stats"%(tag)) )
+bins = max([5,pl.ndata//binfactor])
+
+dirplot = params.get('dirplot', '.')
+if not os.path.exists(dirplot): os.makedirs(dirplot)
+
+
+todName = pl.data.pop('todName')
+length = pl.data.pop('length')
+glitches = pl.data.pop('glitches')
+gainCut = pl.data.pop('gainCut')
+temperatureCut = pl.data.pop('temperatureCut')
+Temp = pl.data.pop('Temp')
+DTemp = pl.data.pop('DTemp')
+
+
+
+for k in list(pl.data.keys()):
+    if k in ['ctime', 'PWV', 'hour', 'hourAfterSunrise', 'hourAfterSunset']: continue
+    valid = np.isfinite(pl.data[k])
+    pl.histogram(pl.data[k][valid], bins=bins, color=color,
+                 title="%s_%s"%(tag,k), xlabel=k, ylabel="# TODs",
+                 display=False)
+
+    y_min, y_max = scoreatpercentile(pl.data[k], [1,99])
+    pl.plotSeason([k], pwv=pwv, ylim = [y_min, y_max],
+                  title=k,
+                  filename=os.path.join(dirplot,'seasonplot_%s_%s.png' %(k,ctag)),
+                  display=False)
+
+
+
+
+now = moby2.util.ctime.time.time()
+xmax = now/86400 + 2440587.5 - 4./24 - 1721424.5
+xmin = (now - 7*24*60*60)/86400 + 2440587.5 - 4./24 - 1721424.5
+for k in ['liveDets','rmsLive']:
+    pl.plotSeason([k], pwv=pwv, xlim=(xmin,xmax),
+                  title=k,
+                  filename=os.path.join(dirplot,'weekplot_%s_%s.png' %(k,ctag)),
+                  display=False)
+
+now = moby2.util.ctime.time.time()
+xmax = now/86400 + 2440587.5 - 4./24 - 1721424.5
+xmin = (now - 2*24*60*60)/86400 + 2440587.5 - 4./24 - 1721424.5
+for k in ['liveDets','rmsLive']:
+    pl.plotSeason([k], pwv=pwv, xlim=(xmin,xmax),
+                  title=k,
+                  filename=os.path.join(dirplot,'dayplot_%s_%s.png' %(k,ctag)),
+                  display=False)
+

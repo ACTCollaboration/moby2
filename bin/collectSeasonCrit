@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+import moby2
+from moby2.analysis.tod_ana import pathologies
+import pickle, numpy,sys, os
+from moby2.util.database import TODList
+from moby2.scripting.pathologies_tools import fix_tod_length
+Pathologies = pathologies.Pathologies
+
+params = moby2.util.MobyDict.from_file( sys.argv[1] )
+depot = moby2.util.Depot(params.get('depot'))
+cutParams = moby2.util.MobyDict.from_file(params.get("cutParams"))
+pathop = cutParams['pathologyParams']
+
+# GET TOD LIST
+obsnames = TODList.from_file(params.get("source_scans"))
+# USE ONLY FILES IN DEPOT_FILE
+depot_file = "%s/%s.db"%(params.get("outdir","."),params.get("report","report"))
+if os.path.isfile(depot_file):
+    done = TODList.from_file(depot_file)
+    undone = obsnames - done
+    obsnames -= undone
+
+print("Collecting Criteria for %d files"%len(obsnames))
+
+tods = []
+sel = []
+scanf = []
+resp = []
+respSel = []
+cal = []
+criteria = {}
+if params.get("keys") is None:
+    keys = ["corrLive", "DELive", "MFELive","darkRatioLive", "ampLive",
+            "rmsLive", "skewLive", "kurtLive",
+            "normLive", "gainLive", "jumpLive",
+            "corrDark", "DEDark", "normDark",
+            "gainDark", "rmsDark", "jumpDark"]
+else:
+    keys = params.get("keys")
+
+n = 0
+N = len(obsnames)
+for obs in obsnames:
+    print("Collecting %s: %d out of %d"%(obs.split("/")[-1], n, N))
+    n += 1
+    try:
+        tod = moby2.scripting.get_tod({"filename":obs, "read_data":False})
+    except:
+        print("Failed")
+        continue
+    if os.path.isfile(depot.get_full_path(Pathologies, tod = tod, tag = params['tag_patho'])) and \
+       os.path.isfile(depot.get_full_path(moby2.TODCuts, tod=tod, tag=params["tag_out"])) and \
+       os.path.isfile(depot.get_full_path(moby2.Calibration, tod=tod, tag=params["tag_cal"])):
+        calo = depot.read_object(moby2.Calibration, tod=tod, tag=params["tag_cal"])
+        if len(calo.cal)==0: 
+            print("No calibration available")
+            continue
+        pa = depot.read_object(Pathologies, tod = tod, tag = params['tag_patho'],
+                               options = {"tod":tod, "params":pathop}, 
+                               structure = params.get("structure"))
+        for crit in keys:
+            if "values" in pa.crit[crit]:
+                criteria.setdefault(crit,[]).append( pa.crit[crit]["values"] )
+        fix_tod_length(tod, pa.offsets)
+        cuts = depot.read_object(moby2.TODCuts, tod=tod, tag=params["tag_out"])
+        re, ff, _, re_sel, _, stable = pa.getpWCalibration()
+        lsel = numpy.zeros(pa.ndet)
+        lsel[cuts.get_uncut()] = True
+        sel.append(lsel)
+        tods.append(tod.info.name)
+        scanf.append(pa.scan_freq)
+        resp.append(re)
+        respSel.append(re_sel)
+        cal.append(calo.get_property("cal", det_uid=tod.det_uid, default=1)[1])
+
+
+data = {}
+data['name'] = tods
+data['sel'] = numpy.array(sel).T
+data["live"] = pa.liveCandidates
+data["dark"] = pa.origDark
+data["scan_freq"] = scanf
+data["resp"] = numpy.array(resp).T
+data["respSel"] = numpy.array(respSel).T
+data["ff"] = ff
+data["cal"] = numpy.array(cal).T
+data["stable"] = stable
+for k in list(criteria.keys()):
+    data[k] = numpy.array(criteria[k]).T
+
+f = open( params.get('critfile',"%s_results_raw.pickle"%params["tag_out"]), 'wb')
+p = pickle.Pickler(f,2)
+p.dump(data)
+f.close()

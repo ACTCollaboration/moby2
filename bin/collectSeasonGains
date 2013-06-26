@@ -1,0 +1,71 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+import os
+import moby2
+from moby2.analysis.tod_ana import pathologies
+import pickle, numpy,sys
+from moby2.util.database import TODList
+from moby2.scripting.products import get_filebase
+Pathologies = pathologies.Pathologies
+
+params = moby2.util.MobyDict.from_file( sys.argv[1] )
+cutParams = moby2.util.MobyDict.from_file(params.get("cutParams"))
+
+depot = moby2.util.Depot(params.get('depot'))
+fb = get_filebase()
+
+# obsnames = []
+# f = open(params['todList'])
+# for l in f:
+#     if l[0] != '#':
+#         obsnames.append(l.split('\n')[0].split()[0])
+# f.close()
+obsnames = TODList.from_file(params.get("todlist"))
+
+tods = []
+gains = []
+sel = []
+
+n = 0
+N = len(obsnames)
+for obs in obsnames:
+    print("Collecting %s: %d out of %d"%(obs, n, N))
+    n += 1
+    try:
+        filename = fb.filename_from_name(obs, single=True)
+        params_loadtod = {
+            'filename':filename,
+            'read_data':False
+            }
+        tod = moby2.scripting.get_tod(params_loadtod)
+    except:
+        print("Failed")
+        continue
+    pathoFile = os.path.exists(
+        depot.get_full_path(Pathologies, tod=tod, tag=params['tag_patho'],
+                            options={'tod':tod}) )
+    if pathoFile:
+        pa = depot.read_object(Pathologies, tod = tod, tag = params['tag_patho'],
+                               options={"tod":tod})
+        #pa.makeNewSelections(flatfield = params["flatfield_in"],
+        #                     params = cutParams.get("pathologyParams"))
+        #sel.append(pa.liveSel[:1024])
+        pa.calibrateValues(flatfield = params["flatfield_in"])
+        gains.append(pa.crit["gainLive"]["values"][:1024])
+        cuts = depot.read_object(moby2.TODCuts, tod = tod, tag = params['tag_cuts'])
+        lsel = numpy.zeros(1024)
+        lsel[cuts.get_uncut()] = True
+        sel.append(lsel)
+        tods.append(tod.info.name)
+
+data = {}
+data['name'] = tods
+data['gain'] = numpy.array(gains).T
+data['sel'] = numpy.array(sel).T
+
+f = open(params['gainfile'], 'wb')
+p = pickle.Pickler(f,2)
+p.dump(data)
+f.close()

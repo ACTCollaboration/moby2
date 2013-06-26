@@ -1,0 +1,269 @@
+#!/usr/bin/python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+"""
+This script will analyze a set of beam maps and produce an extensive
+analysis object that can be consumed downstream for things like:
+
+- determining planetary calibration factors
+- modeling bulk telescope pointing shifts
+
+It is intended to be run a couple of times, with the user tweaking the
+cuts levels in the parameter file, which should be based on
+params/beamObs.par.
+"""
+
+import sys, os
+
+import moby2
+from moby2.analysis.beam_ana import BeamObs, BeamObsList
+
+import numpy as np
+from pylab import *
+
+
+def concise_data(obs, params):
+    data = {}
+    for k in list(params['cut_aliases'].keys()):
+        k1, k2, m, b = params['cut_aliases'][k]
+        data[k] = m*array([o[k1][k2] for o in obs]) + b
+    # Zero some stuff we can't compute yet
+    for k in params['zero_fields']:
+        data[k] = 0 * list(data.values())[0]
+
+    # The hour is pretty useful...
+    data['hour'] = ((data['t'] + 3600*4)%86400 - 3600*4) / 3600
+
+    return data
+
+def range_cut_mask(data, params):
+    src = params['simple_range_cuts']
+    sel = ones(list(data.values())[0].shape[0], dtype='bool')
+    for k, (r0, r1) in zip(list(src.keys()), list(src.values())):
+        sel *= (data[k]>=r0)*(data[k]<r1)
+    return sel
+
+def blacklist_mask(obs, params):
+    basenames = list(obs.get('info', 'basename'))
+    mask = ones(len(basenames), dtype='bool')
+    for filename in params.get('blacklists', []):
+        for line in open(filename):
+            b = line.strip()
+            if b in basenames:
+                mask[basenames.index(b)] = False
+    return mask
+    
+def savef(suffix):
+    savefig('%s%s.png' % (params['plot_prefix'], suffix))
+    clf()
+
+def fix_ax():
+    ax = gca()
+    ax.xaxis.set_major_locator(MaxNLocator(5))
+
+def plot_all(data, sel=None):
+    # Load into env for convenience
+    data2 = {}
+    for k,v in zip(list(data.keys()), list(data.values())):
+        if sel is not None: v = v[sel]
+        data2[k] = v
+    data = data2
+    
+    az_ranges = [((0, 180), 'rising', 'r'),
+                 ((180, 360), 'setting', 'b'),]
+    az_ranges = [ ((data['x']>=r[0])*(data['x']<r[1]), l, c) \
+                  for r, l, c in az_ranges ]
+    az_ranges = [ (m,l,c) for m,l,c in az_ranges if sum(m)>0 ]
+
+    data['hour'] = fmod(data['t'], 86400) / 3600
+    data['day'] = (data['t'] - day0) / 86400
+
+    # Histogram of position and pointing deviations.
+    for i, (k,xl,bw) in enumerate([('dx', 'dx (arcsec)', 5.),
+                                   ('dy', 'dy (arcsec)', 5.),
+                                   ('x', 'az (deg)', 1.),
+                                   ('y', 'alt (deg)', 1.)]):
+        subplot(221+i)
+        d = data[k]
+        bins = arange(amin(d)-bw/2, amax(d)+bw*1.1, bw)
+        for m, l, c in az_ranges:
+            hist(d[m], edgecolor=c, bins=bins, histtype='step')
+        fix_ax()
+        xlabel(xl)
+    savef('xy_hist')
+
+    # Histogram of gaussian fit amplitude and FWHM, and white noise.
+    for i,(k,xl,bw,lims) in enumerate(
+        [('fwhm_a', 'FWHM_maj (arcmin)', 0.03, [0., 2.]),
+         ('fwhm_b', 'FWHM_min (arcmin)', 0.03, [0., 2.]),
+         ('amp', 'amplitude (fW)', 0.2, [0., 10.]),
+         ('peak', 'peak estimate (fW)', 0.2, [0., 10.])]):
+        subplot(221+i)
+        d = data[k]
+        mn, mx = max(amin(d), lims[0])-bw/2, min(amax(d), lims[1])+bw/2*1.1
+        bins = len(d)//2 #arange(mn, mx, bw)
+        hist(d, bins=bins)
+        xlabel(xl)
+        ax = gca()
+        ax.xaxis.set_major_locator(MaxNLocator(5))
+    savef('fit_hist')
+
+    # Correlations
+    m = ~isnan(data['pwv'][:,0])
+    subplot(221)
+    scatter(data['pwv'][m,0], data['peak'][m])
+    ylabel('peak estimate')
+    subplot(222)
+    scatter(data['amp'], data['peak'])
+    subplot(223)
+    scatter(data['pwv'][m,0], data['noise'][m])
+    xlabel('PWV')
+    ylabel('noise')
+    subplot(224)
+    scatter(data['amp'], data['noise'])
+    xlabel('amp')
+    savef('correl')
+    
+    def plot_ensemble(xfields, yfields):
+        clf()
+        i = 0
+        for _y in yfields:
+            for _x in xfields:
+                subplot(221+i)
+                for m, l, c in az_ranges:
+                    scatter(data[_x][m], data[_y][m], c=c)
+                if i % 2 == 0:
+                    ylabel(_y)
+                if i // 2 == 1:
+                    xlabel(_x)
+                i+=1
+                fix_ax()
+    
+    # Amplitude and solid angles with time
+    plot_ensemble(['hour', 'day'], ['amp', 'omega_g'])
+    savef('focus_time')
+
+    # Pointing deviations vs. azimuth and altitude
+    plot_ensemble(['x', 'y'], ['dx', 'dy'])
+    savef('pointing_space')
+
+    # Pointing deviations vs. hour of day and day of year.
+    plot_ensemble(['hour', 'day'],['dx', 'dy'])
+    savef('pointing_time')
+
+## MAIN
+
+from optparse import OptionParser
+
+ot = OptionParser()
+ot.add_option('-x', '--overwrite', action='store_true')
+ot.add_option('--store-partial', action='store_true')
+opts, args = ot.parse_args()
+
+param_file = args.pop(0)
+params = moby2.util.MobyDict.from_file(param_file)
+
+if params['source_method'] == 'glob':
+    import glob
+    args = sorted(glob.glob(params['source_select']))
+else:
+    raise RuntimeError
+
+archive = params['raw_archive']
+
+if os.path.exists(archive) and not params.get('raw_archive_recreate', False):
+    obs = BeamObsList(archive)
+    print('Loaded archive for %i files.' % len(obs))
+else:
+    print('Processing %i maps...' % len(args))
+    obs = BeamObsList()
+    for f in args:
+        b = BeamObs(mapfile=f)
+#        if b.find() and b.fit():
+        if b.fit():
+            obs.append(b)
+            print(' ok %s' % f)
+        else:
+            print(' failed to analyze %s' % f)
+            if opts.store_partial:
+                obs.append(b)
+
+    print('Saving archive for %i files.' % len(obs))
+    obs.write(archive, force=True)
+
+data = concise_data(obs, params)
+if params['apply_cuts']:
+    sel = range_cut_mask(data, params)
+    if sum(sel) == 0:
+        print('Warning, all observations cut!')
+    sel_b = blacklist_mask(obs, params)
+    print('Cut:         %3i' % sum(~sel))
+    print('Blacklisted: %3i' % sum(~sel_b*sel))
+    obs2 = BeamObsList()
+    obs2 += [o for o,s in zip(obs, sel*sel_b) if s]
+    print('Cuts leave %i files.' % len(obs2))
+    if params['cut_archive'] is not None:
+        print('Writing cut archive to %s.' % params['cut_archive'])
+        obs2.write(params['cut_archive'], force=params.get('cut_archive_recreate',False))
+else:
+    sel = array([True for o in obs])
+    obs2 = obs
+    print('No cuts requested.')
+
+plot_pref = params.get('plot_prefix', None)
+if plot_pref is not None:
+    if not os.path.exists(plot_pref):
+        os.makedirs(os.path.split(plot_pref)[0])
+    day0_str = params['reference_date']
+    if day0_str is None:
+        info = moby2.tod.TODInfo.from_filename(obs[0]['info']['basename'])
+        #from utilities import season, ctime
+        #day0_str = 'May 1 %s' % season.fromBasename(obs[0]['info']['basename'])
+        day0_str = '%s-05-01' % info.season
+        day0 = moby2.util.ctime.from_string(day0_str, format='%Y-%m-%d')
+    plot_all(data, sel)
+
+if params.get('basename_list', None) is not None:
+    fout = open(params['basename_list'], 'w')
+    for b in obs2.get('info', 'basename'):
+        fout.write('%s\n' % b)
+    fout.close()
+
+mean_mapfile = params.get('mean_map', None)
+if mean_mapfile is not None:
+    if os.path.exists(mean_mapfile):
+        os.remove(mean_mapfile)
+    # Borrow initial map coords and stuff
+    obs2[0]._loadMap()
+    map0 = obs2[0].map
+    map0.data *= 0
+    weights = zeros(map0.data.shape, dtype='float')
+
+    # Weighting method
+    weighting = params['mean_map_weighting']
+    if not (weighting in ['flat', 'noise']):
+        raise RuntimeError('unknown weighting scheme "%s"' % weighting)
+
+    # Combine
+    print('Combining %i files into mean map.' % len(obs2))
+    for o in obs2:
+        o._loadMap()
+        # Get map with mask and correct level and sign
+        map = o.map
+        m = o._getWeightMask()
+        map.data = o['basic']['cal_sign']*map.data - o['gaussian']['level']
+        dx, dy = o['gaussian']['dx'], o['gaussian']['dy']
+        # Remove gaussian center
+        map = fitsMap.shiftImage(map, -dx, -dy)
+        if weighting == 'noise':
+            w = o['noise']['rms']**2 * m.astype('int')
+        else:
+            w = m.astype('int').astype('float')
+        weights += w
+        map0.data += w*(map.data - o['gaussian']['level'])
+        o._clearMap()
+
+    map0.data[weights!=0] /= weights[weights!=0]
+    print('Writing mean map to %s' % params['mean_map'])
+    map0.write(params['mean_map'])

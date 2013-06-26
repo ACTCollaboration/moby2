@@ -1,0 +1,404 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+"""
+Combine (planet) maps in a co-add.  You can apply cuts based on a
+Gaussian fits or az/el or anything else that has been previously saved
+in a BeamObsList, an ObsCatalog, or some other data file.  Per-map
+pointing shifts are implemented using Fourier-based interpolation;
+shifts can be taken from BeamObsList or elsewhere.
+"""
+
+import moby2
+
+from moby2.analysis import beam_ana
+
+import numpy as np
+
+def rotate_maps(maps, codes, rotate_codes, angle):
+    idx0 = list(codes).index(rotate_codes[0])
+    idx1 = list(codes).index(rotate_codes[1])
+    d0 = maps[idx0].data
+    d1 = maps[idx1].data
+    c, s = np.cos(angle*np.pi/180), np.sin(angle*np.pi/180)
+    out0 = d0*c + d1*s
+    out1 = d1*c - d1*s
+    maps[idx0].data[:] = out0
+    maps[idx1].data[:] = out1
+
+class MapStacker:
+    def __init__(self):
+        self.n = 0
+    def add(self, m, w=1):
+        if self.n == 0:
+            self.map = m.copy(copyData=False)
+            self.weight = 0
+        self.map.data += m.data * w
+        self.weight += w
+        self.n += 1
+    def get_mean(self):
+        m = self.map.copy()
+        m.data /= self.weight
+        return m
+
+from optparse import OptionParser
+o = OptionParser(usage="%prog [options] param_file [map_file,...]")
+o.add_option('-v','--verbosity',type=int,default=1)
+o.add_option('-o','--output-prefix',default=None)
+#o.add_option('-i','--interactive-errors',action='store_true')
+opts, args = o.parse_args()
+
+if len(args) < 1:
+    o.error("Provide a parameters file as first argument.")
+
+params = moby2.util.MobyDict.from_file(args[0])
+if opts.output_prefix is not None:
+    params.set_deep(('moby_options', 'output_prefix'), opts.output_prefix)
+
+# Create output folder
+outputm = moby2.scripting.OutputFiler(
+    prefix=params.get_deep(('moby_options', 'output_prefix')))
+
+logger = moby2.util.log.get_logger()
+
+
+# For IQU...
+pol_type = params.get_deep(('source_maps', 'pol_type'), None)
+if pol_type is None:
+    pol_type = 'I'
+if pol_type == 'I':
+    pol_codes = ['I']
+elif pol_type == 'IQU':
+    pol_codes = 'IQU'
+else:
+    raise ValueError("Unknown pol_type '%s'" % pol_type)
+
+# Get coherent list of maps and basenames.
+basenames = None
+map_files = {}
+for pol_code in pol_codes:
+    b, m = beam_ana.util.get_map_list(params['source_maps'],
+                                        data={'pol_code': pol_code})
+    if basenames is None:
+        basenames = b
+        map_files = dict([(_b,[]) for _b in b])
+    for _b, _m in zip(b, m):
+        map_files[_b].append(_m) 
+
+print('Loaded list of %i maps' % len(basenames))
+
+# Default plotting opts...
+default_popts = {
+    'plot_file': None,
+    'zoom': 6.,
+    'center': True,
+    'scale': 'log',
+    'rescale': True,
+    'size_inches': (6., 5.),
+}
+default_popts.update(params.get('output'))
+
+# Create a BeamObsList.  Maybe we won't use it.
+bol = None
+bol_file = params.get_deep(('source_maps', 'beam_obs_fit'))
+if bol_file is not None:
+    bol = beam_ana.BeamObsList()
+    bol_in = beam_ana.BeamObsList.from_file(bol_file)
+    bn = list(bol_in.get('init', 'basename'))
+    n_matched = 0
+    for b in basenames:
+        try:
+            idx = bn.index(b)
+            bol.append(bol_in[idx])
+            n_matched += 1
+        except:
+            bol.append(None)
+            continue
+    if n_matched == 0:
+        print('Did not match basenames...')
+        print('I have maps like', basenames[:4])
+        print('But the beam_obs is like', bn[:4])
+    del bol_in
+
+# Alignment shifts?
+sh_params = params.get('shifts', {})
+sh_source = sh_params.get('source')
+if sh_source is None:
+    shifts = [(0., 0.) for x in range(len(basenames))]
+elif sh_source == 'beam_obs_fit':
+    shifts = []
+    for bo in bol:
+        shifts.append(None)
+        if bo is not None and bo['gaussian']['ok']:
+            shifts[-1] = (bo['gaussian']['dx'], bo['gaussian']['dy'])
+elif sh_source == 'columns_file':
+    # Load
+    shift_data = moby2.util.StructDB.from_column_file(
+        sh_params['filename'], sh_params['columns'])
+    shifts = []
+    idx = shift_data.select_inner({'basename': basenames})
+    for i in idx:
+        if i >= 0:
+            shifts.append((shift_data['dx'][i], shift_data['dy'][i]))
+        else:
+            shifts.append(None)
+else:
+    raise RuntimeError("I do not understand 'shifts' instructions.")
+
+# Calibration?
+recal = [1.] * len(basenames)
+cal_params = params.get('calibration', {})
+cal_source = cal_params.get('source')
+if cal_source is None:
+    pass
+elif cal_source == 'columns_file':
+    cal_data = moby2.util.StructDB.from_column_file(
+        cal_params['filename'], cal_params['columns'])
+    idx = cal_data.select_inner({'basename': basenames})
+    recal = []
+    for i in idx:
+        if i >= 0:
+            recal.append(cal_data['cal'][i])
+        else:
+            recal.append(None)
+
+# Load an observation catalog?
+obscat = moby2.scripting.get_obs_catalog(params.get_deep(
+        ('source_maps', 'catalog')))
+
+# 'basename' is sometimes of the form (tod_id)_(freq_code)...
+tod_ids = list(map(beam_ana.util.extract_basename, basenames))
+
+obs_idx = obscat.select_inner({'tod_name': tod_ids})
+assert(np.all(obs_idx) >= 0)
+obscat = obscat[obs_idx]
+del obs_idx
+
+# Basic cuts
+mask0 = moby2.scripting.get_selection(
+    params.get_deep(('source_maps', 'cuts'), []), obscat)
+
+# Build up more auxiliary data from the BeamObsList.
+aux_data = {}
+for k in ['alt', 'az', 'ctime', 'hour', 'day',
+          'pwv', 'loading',
+          'dx', 'dy', 'amp',
+          'mask_frac',
+          'nom_freq']:
+    aux_data[k] = [None] * len(basenames)
+
+aux_rebranch = {
+    'az': 360.,
+    'hour': 24.,
+}
+
+for i, b in enumerate(basenames):
+    info = moby2.scripting.products.get_tod_info_new({'tod_id': tod_ids[i]})
+    for k,v in list(info.items()):
+        if k in aux_data:
+            aux_data[k][i] = info[k]
+    try:
+        aux_data['nom_freq'][i] = b.split('_')[1]
+    except ValueError:
+        pass
+    if bol[i] is None:
+        continue
+    if bol[i].get('gaussian', {}).get('ok'):
+        for k in ['dx', 'dy', 'amp']:
+            aux_data[k][i] = bol[i]['gaussian'][k]
+    if bol[i].get('info'):
+        for k in ['ctime', 'pwv']:
+            aux_data[k][i] = bol[i]['info'][k]
+        aux_data['alt'][i] = bol[i]['info']['mean_alt']
+        aux_data['az'][i] = 0.5*(
+            bol[i]['info']['min_az'] + bol[i]['info']['max_az'])
+        t = aux_data['ctime']
+        aux_data['hour'][i] = (aux_data['ctime'][i] % 86400.) / 3600
+        aux_data['day'][i] = aux_data['ctime'][i] / 86400
+        if aux_data['pwv'][i] is not None:
+            aux_data['loading'][i] = aux_data['pwv'][i] / \
+                np.sin(aux_data['alt'][i] * np.pi/180.)
+
+# Load other aux data from files?
+for aux_item in params.get_deep(('source_maps', 'aux_data'), []):
+    filename, col_idx = aux_item
+    col_name, col_idx = list(col_idx.keys()), list(col_idx.values())
+    item_data = moby2.util.ascii.read_columns(filename, col_idx)
+    item_data = dict(list(zip(col_name, item_data)))
+    if 'basename' in item_data:
+        aux_bn = item_data.pop('basename')
+        match_list = list(basenames)
+    elif 'tod_id' in item_data:
+        aux_bn = item_data.pop('tod_id')
+        match_list = list(tod_ids)
+    for k in list(item_data.keys()):
+        aux_data[k] = [None] * len(basenames)
+    for bi,b in enumerate(aux_bn):
+        try:
+            i = match_list.index(b)
+        except:
+            continue
+        for k,v in list(item_data.items()):
+            aux_data[k][i] = v[bi]
+
+
+# For each output map, maintain a set of map stacks
+maps_out = params.get('maps_out', [('default', {})])
+map_avg_set = {}
+map_set_masks = {}
+for map_name, cuts in maps_out:
+    map_avg_set[map_name] = {} # [MapStacker() for pol_code in pol_codes]
+    map_set_masks[map_name] = mask0 * \
+        moby2.scripting.get_selection(list(cuts.items()), obscat, aux_data)
+
+#
+# Loop over maps, co-adding them into whatever stacks they belong in.
+#
+map_members = []
+
+for im in range(len(basenames)):
+
+    info_dict = obscat.get_row(im)
+    info_dict.update(dict([(k, v[im]) for k,v in list(aux_data.items())]))
+    info_dict.update({
+        'tod_id': tod_ids[im],
+        'basename': basenames[im],
+        'map_files': map_files[basenames[im]],
+    })
+
+    print('{basename} {map_files[0]}'.format(**info_dict))
+
+    if shifts[im] is None:
+        print(' skipping on no shift')
+        continue
+    dx, dy = shifts[im]
+
+    if recal[im] is None:
+        print(' skipping on no cal')
+        continue
+
+    # Load map
+    maps_in = list(map(moby2.mapping.fits_map.spaceMap, info_dict['map_files']))
+
+    if recal[im] != 1:
+        for m in maps_in:
+            m.data *= recal[im]
+
+    # Fix-me... replace with arbitrary QU transform.
+    if params.get_deep(('source_maps', 'flip_QU'), False):
+        rotate_maps(maps_in, pol_codes, ['Q','U'], 180.)
+
+    extract_params = params.get_deep(('source_maps', 'extract'))
+    if extract_params is not None:
+        maps_in = [m.extract(*extract_params) for m in maps_in]
+
+    # Get weight near planet center
+    rs = maps_in[0].circleMask(.1, dx, dy)
+    if rs.sum() == 0:
+        print(' - no pixels in mask!')
+        stopp
+        continue
+    mask_frac = info_dict['mask_frac']
+    if mask_frac is None and maps_in[0].weight is not None:
+        mask_frac = \
+            (maps_in[0].weight[rs] > 0).sum() / float(rs.sum())
+
+    # Only proceed if someone wants this...
+    if not np.any([_mask[im] for _mask in list(map_set_masks.values())]):
+        continue
+
+    # Get variance?
+    noise_radii = params.get_deep(('output', 'noise_weight'))
+    if noise_radii is not None:
+        rs = ~maps_in[0].circleMask(noise_radii[0], dx, dy) * \
+            maps_in[0].circleMask(noise_radii[1], dx, dy) * \
+            maps_in[0].data != 0.
+        map_weight = maps_in[0].data[rs].std()**-2
+    else:
+        map_weight = 1
+
+    # Align maps as instructed.
+    maps_shifted = [moby2.mapping.fits_map.shiftImage(m, -dx, -dy)
+                    for m in maps_in]
+
+    for (map_name, cuts) in maps_out:
+        if not map_set_masks[map_name][im]:
+            continue
+        map_namef = map_name.format(**info_dict)
+        if not map_namef in map_avg_set[map_name]:
+            map_avg_set[map_name][map_namef] = [MapStacker() for pol_code in pol_codes]
+        map_members.append((map_namef, map_avg_set[map_name][map_namef][0].n, info_dict))
+        for mavg,m in zip(map_avg_set[map_name][map_namef], maps_shifted):
+            mavg.add(m, map_weight)
+
+
+#
+# Write members...
+#
+member_filename = outputm.get_filename(params.get_deep(('output', 'membership_file')))
+if member_filename is not None:
+    map_namef, idx, info = list(zip(*map_members))
+    mdb = moby2.util.StructDB.from_data([
+        ('map_name', map_namef),
+        ('tod_id', [_info['basename'] for _info in info]),
+        ('counter', idx)])
+    mdb.to_fits_table(member_filename)
+
+
+#
+# Write results
+#
+print('Writing maps.')
+
+for map_name_fmt, _ in maps_out:
+    print('For map_set %s:' % map_name_fmt)
+    for map_name, map_avg in sorted(map_avg_set[map_name_fmt].items()):
+        #map_avg = map_avg_set[map_name]
+        print('%s has %i contributors '% (map_name, map_avg[0].n))
+        if map_avg[0].n == 0:
+            print('   skipping!')
+            continue
+        # Write output map.
+        fmt_data = {'map_name': map_name}
+        if pol_type == 'I':
+            map_out = map_avg[0].get_mean()
+            fmt_data['pol_code'] = 'I'
+        elif pol_type == 'IQU':
+            map_out = moby2.mapping.pol_map.IQUMap()
+            for code, mavg in zip(pol_codes, map_avg):
+                map_out.set_image(code, mavg.get_mean())
+            fmt_data['pol_code'] = '{submap_code}' # to be filled in by IQUMap.write...
+
+        ofile = outputm.get_filename(params.get_deep(('output', 'map_file')),
+                                     data=fmt_data)
+        if ofile is not None:
+            print(' writing', ofile)
+            map_out.write(ofile, force=True)
+
+        ofile = outputm.get_filename(params.get_deep(('output', 'plot_file')),
+                                     data=fmt_data)
+        if ofile is not None:
+            print(' writing', ofile)
+            if pol_type == 'I':
+                bo = beam_ana.BeamObs(map=map_out)
+                bo.fit()
+                beam_ana.plot_beam_image(map_out, beam_obs=bo,
+                                         title=default_popts.get('title'),
+                                         params=default_popts, filename=ofile)
+
+            else:
+                if params.get_deep(('output', 'smooth_pol')):
+                    print(' (smoothing)')
+                    import scipy.ndimage as ndi
+                    sig = params['output']['smooth_pol']
+                    pitch = map_out.pixn.truePitch()
+                    kx, ky = sig/abs(pitch[0]), sig/abs(pitch[1])
+                    for q in 'QU':
+                        map_out.data[q].data[:] = ndi.gaussian_filter(
+                            map_out.data[q].data, (ky,kx))
+
+                map_out.pretty_plot(filename=ofile, units='arcmin', **default_popts)
+
+

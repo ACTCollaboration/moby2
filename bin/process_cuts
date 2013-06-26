@@ -1,0 +1,349 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+USAGE = """
+%process_cuts [options] dir_file param_file 
+
+Obtain the cuts and pathologies analysis for a TOD.
+"""
+
+import sys, os
+import time
+import numpy as np
+
+import moby2.util.noninteractive_plots
+
+import moby2
+from moby2.scripting import products
+from moby2.analysis.tod_ana import pathologies
+from moby2.analysis import hwp
+import h5py
+from optparse import OptionParser
+
+o = OptionParser(usage=USAGE)
+o.add_option('-v','--verbosity',type=int,default=1)
+o.add_option('-o','--output-prefix',default=None)
+o.add_option('-i','--interactive-errors',action='store_true')
+opts, args = o.parse_args()
+
+if len(args) < 2:
+    o.error(USAGE)
+
+
+#
+# Load parameters, update them from command line as needed
+#
+
+obs = args[0]
+params = moby2.util.MobyDict.from_file(args[1])
+IV_wait = params.get("IV_wait",0)
+rebias_wait = params.get("rebias_wait",0)
+end = params.get("sample_end",None)
+if end is not None:
+    end = -end
+
+if opts.output_prefix is not None:
+    params.set_deep(('output', 'prefix'), opts.output_prefix)
+
+if opts.verbosity is not None:
+    params.set_deep(('moby_options', 'verbosity'), opts.verbosity)
+
+if opts.interactive_errors:
+    moby2.util.debugger.interactive(True)
+
+# Output manager for filenames...
+outputm = moby2.scripting.OutputFiler(
+    prefix=params.get_deep(('output', 'prefix')))
+
+# Set up logging
+if params.get_deep(("moby_options","log_file")) is not None:
+    log_file = os.path.join(params.get("outdir","."),params.get_deep(("moby_options","log_file")))
+    params.set_deep(("moby_options","log_file"), log_file)
+    params.set_deep(("moby_options","append"), True)
+logger = moby2.util.log.logger
+logger.init_from_params(params.get('moby_options', {}))
+
+
+depot = moby2.util.Depot(params.get('depot'))
+cutParams = params.get('cutParams')
+if cutParams is None:
+    raise
+else:
+    cpar = moby2.util.MobyDict.from_file(cutParams)
+    pathop = cpar['pathologyParams']
+    glitchp = cpar['glitchParams']
+
+# Fill cuts parameter
+no_noise = not(cpar.get("fillWithNoise",True))
+
+user_config = moby2.util.get_user_config()
+moby2.pointing.set_bulletin_A(params=user_config.get('bulletin_A_settings'))
+
+# Check for existing results, to set what operations must be done/redone.
+syncResult = os.path.exists(
+    depot.get_full_path(moby2.tod.Sync, tag=params.get('tag_sync'), tod=obs) )
+skipSync = not params.get("removeSync",False) or (
+    not params.get('forceSync',False) and syncResult )
+                                                    
+partialResult = os.path.exists(
+    depot.get_full_path(moby2.TODCuts, tag=params.get('tag_partial'), tod=obs) )
+skipPartial = skipSync and not params.get("forcePartial",False) and partialResult
+
+pathoResult = os.path.exists(
+    depot.get_full_path(pathologies.Pathologies,
+                        tag=params.get('tag_patho'), tod=obs) )
+skipPatho = skipPartial and not params.get("forcePatho",False) and pathoResult
+
+logger.trace(0,"skipSync = %s, skipPartial = %s, skipPatho = %s"%(skipSync,skipPartial,skipPatho))
+
+if skipPatho:
+    logger.trace(0, "Using old pathologies result")
+    dt1 = dt2 = dt3 = dt4 = dt5 = dt6 = dt7 = 0
+else:
+    logger.trace(0, "Finding new pathologies")
+
+    # Find IV/rebias gap time
+    ct = int(obs.split("/")[-1].split(".")[0])
+    ctimes = (ct-IV_wait,ct)
+    if products._get_instrument() == "actpol":
+        from moby2.instruments import actpol as inst
+    elif products._get_instrument() == "mbac":
+        from moby2.instruments import mbac as inst
+    try:
+        config_file = params.get('manifest_conf', None)
+        db = inst.TODDatabase(config_file=config_file)
+    except:
+        db = None
+    if (db is None) or (db.db is None):
+        logger.trace(0, "Database not accessible, IV/rebias offsets set to 0")
+        offset_IV = 0
+        offset_rebias = 0
+    else:
+        recs = db.select_acqs(suffix='iv', ctime=ctimes)
+        if len(recs) > 0:
+            offset_IV = (IV_wait - ct + recs[-1].ctime)*400
+        else:
+            offset_IV = 0
+        logger.trace(0,"IV offset set to %d"%offset_IV)
+        ctimes = (ct-rebias_wait,ct)
+        recs = db.select_acqs(suffix='bc1_step', ctime=ctimes)
+        if len(recs) > 0:
+            offset_rebias = (rebias_wait - ct + recs[-1].ctime)*400
+        else:
+            offset_rebias = 0
+        logger.trace(0,"Rebias offset set to %d"%offset_rebias)
+
+
+    offset = max( offset_IV, offset_rebias, params.get("offset",0)*400 )
+    logger.trace(0,"Total offset set to %d" %offset)
+
+
+    # READ TOD
+    tic1 = time.time()
+    params_loadtod = {
+        'filename':obs,
+        'fix_sign':True,
+        'start':offset,
+        'end':end,
+        'repair_pointing':True
+        }
+    params_loadtod.update(params.get("params_loadtod",{}))
+    tod = moby2.scripting.get_tod(params_loadtod)
+    dt = (time.time() - tic1) / 60
+    #minFreq = pathop["findPathoParams"]["lowFreqFilter"][0]
+    minFreq = pathop["findPathoParams"]['liveCorrPar']['freqRange']['fmin']
+    minPeriods = pathop["findPathoParams"].get("minPeriods", 1.)
+    minTODlength = 1 / minFreq * minPeriods
+    logger.trace(0, "It took %6.2f minutes to load TOD"%dt)
+    logger.trace(0, "Processing TOD %s" % tod.info.name)
+    logger.trace(0, "ndata = %d"%tod.data.shape[1])
+    if minTODlength > tod.ctime[-1] - tod.ctime[0]:
+        raise RuntimeError("TOD too short to perform LF analysis")
+#    if tod.data.shape[1] < 10000: sys.exit()
+    tic2 = time.time()
+
+    # SUBSTRACT A(CHI)
+    if params.get("substract_hwp",False):
+        logger.trace(0, "Substract HWP signal")
+        parHWP = cpar['HWP']
+        hwp_modes = depot.read_object(
+            hwp.HWPModes,
+            tag = parHWP['a_chi']['tag'],
+            tod=tod,
+            structure= parHWP['a_chi']['structure'] )
+        hwp_angles = moby2.scripting.products.get_hwp_angles(parHWP['angles'], tod)
+        r = hwp_modes.get_reconstructor(hwp_angles*np.pi/180)
+        hwp_signal = r.get_achi()
+        tod.data[hwp_modes.det_uid,:]-= hwp_signal
+
+    # CUT MCE FRAME ERROR
+    mce_cuts = moby2.tod.get_mce_cuts(tod)
+    moby2.tod.fill_cuts(tod, mce_cuts, no_noise = no_noise)
+
+    # CUT SOURCES
+    sourceResult = os.path.exists(
+        depot.get_full_path(moby2.TODCuts, tag=params['tag_source'], tod=tod) ) 
+
+    if 'hdf_source_cuts' in params and not sourceResult:
+        f = h5py.File(params.get('hdf_source_cuts'), 'r+')
+        if tod.info.basename in f:
+            grp = f[tod.info.basename]
+            grp.attrs['_moby2_class_name'] ='tod_flags'
+            grp.attrs['_moby2_class_version'] = 1
+            flags_sources = moby2.tod.TODFlags.from_hdf(grp)
+            pos_cuts_sources = flags_sources.get_cuts('cut')
+            depot.write_object(pos_cuts_sources,
+                               tag=params.get('tag_source'),
+                               force=True, tod=tod, make_dirs=True)
+            sourceResult = True
+
+    if sourceResult:
+        logger.trace(0, "Loading time stream cuts (%s)" % params['tag_source'])
+        source_cuts = depot.read_object(moby2.TODCuts,
+                                     tag=params['tag_source'], tod=tod)
+        moby2.tod.fill_cuts(tod, source_cuts, no_noise = no_noise)
+    elif cpar.get_deep(('source_cuts','source_list'),None) is not None:
+        logger.trace(0, "Finding new source cuts")
+        tod.fplane = products.get_focal_plane(cpar['pointing'], tod.info)
+        # f = open(cpar['source_cuts']['source_list'], 'r')
+        # source_list = f.readlines()
+        # source_list = [(s.strip('\n'), 'source') for s in source_list]
+        # f.close()
+        pointing_shift = (0,0)
+        mask_params = cpar.get_deep(('source_cuts','mask_params'),{})
+        shift_params = cpar.get_deep(('source_cuts', 'mask_shift_generator'))
+        if shift_params is not None:
+            pointing_shift = products.get_pointing_offset(
+                shift_params, tod=tod, source_offset=True)
+            # mask_params['offset'] = products.get_pointing_offset(
+            #     shift_params, tod=tod, source_offset=True)
+            # if mask_params['offset'] is None:
+            #     mask_params['offset'] = (0.,0.)
+            # if max(mask_params['offset']) > 20./60:
+            #     mask_params['map_size'] = max(mask_params['offset']) + 10./60
+        matched_sources = moby2.ephem.get_sources_in_tod(
+            tod=tod, source_list=cpar['source_cuts']['source_list'], pointing_shift=pointing_shift)
+        pos_cuts_sources = moby2.TODCuts.for_tod(tod, assign=False)
+        pos_cut_dict = {}
+        print(matched_sources)
+        for source in matched_sources:
+            pos_cut_dict[source[0]] = moby2.tod.get_source_cuts(
+                tod, source[1], source[2], **mask_params)
+            pos_cuts_sources.merge_tod_cuts(pos_cut_dict[source[0]])
+        depot.write_object(pos_cuts_sources,
+                           tag=params.get('tag_source'),
+                           force=True, tod=tod, make_dirs=True)
+        moby2.tod.fill_cuts(tod, pos_cuts_sources, no_noise = no_noise)
+
+    # CUT PLANETS
+    if params.get("cut_planets",False):
+        planetResult = os.path.exists(
+            depot.get_full_path(moby2.TODCuts, tag=params['tag_planet'], tod=tod) ) 
+        if planetResult:
+            logger.trace(0, "Loading time stream cuts (%s)" % params['tag_planet'])
+            pos_cuts_planets = depot.read_object(moby2.TODCuts,
+                                         tag=params['tag_planet'], tod=tod)
+        else:
+            logger.trace(0, "Finding new planet cuts")
+            if not hasattr(tod,'fplane'):
+                tod.fplane = products.get_focal_plane(cpar['pointing'], tod.info)
+            matched_sources = moby2.ephem.get_sources_in_patch(
+                tod=tod, source_list=None)
+            mask_params = cpar.get_deep(('planet_cuts','mask_params'),{})
+            shift_params = cpar.get_deep(('planet_cuts', 'mask_shift_generator'))
+            if shift_params is not None:
+                mask_params['offset'] = products.get_pointing_offset(
+                    shift_params, tod=tod, source_offset=True)
+            if mask_params['offset'] is None:
+                mask_params['offset'] = (0.,0.)
+            if max(mask_params['offset']) > 20./60:
+                mask_params['map_size'] = max(mask_params['offset']) + 10./60
+            pos_cuts_planets = moby2.TODCuts.for_tod(tod, assign=False)
+            pos_cut_dict = {}
+            print(matched_sources)
+            for source in matched_sources:
+                pos_cut_dict[source[0]] = moby2.tod.get_source_cuts(
+                    tod, source[1], source[2], **mask_params)
+                pos_cuts_planets.merge_tod_cuts(pos_cut_dict[source[0]])
+            depot.write_object(pos_cuts_planets, tag=params.get('tag_planet'),
+                               force=True, tod=tod, make_dirs=True)
+        moby2.tod.fill_cuts(tod, pos_cuts_planets, no_noise = no_noise)
+
+
+    # FIT/REMOVE SYNCHRONOUS PICKUP
+    tic3 = time.time()
+    scanFreq = moby2.tod.get_scan_info(tod).scan_freq
+    if params.get("removeSync",False) and (scanFreq != 0): 
+        logger.trace(0, "Removing Sync")
+        if skipSync:
+            logger.trace(2, "Using old sync")
+            ss = depot.read_object(moby2.tod.Sync,
+                                   tag=params.get('tag_sync'), tod=tod)
+        else:
+            logger.trace(2, "Computing new sync")
+            ss = moby2.tod.Sync(tod)
+            ss.findOutliers()
+            ss = ss.extend()
+            depot.write_object(ss, tag=params.get('tag_sync'), tod=tod,
+                               make_dirs=True, force=True)
+        ss.removeAll()
+        del ss
+   
+    # PARTIAL CUTS
+    tic5 = time.time()
+    if skipPartial:
+        # Read existing result
+        cuts_partial = depot.read_object(moby2.TODCuts, 
+                                         tag=params.get('tag_partial'), tod=tod)
+    else:
+        # Generate and save new glitch cuts (note calbol may not be implemented...)
+        cuts_partial = moby2.tod.get_glitch_cuts(tod=tod, params=glitchp)
+        cuts_partial.merge_tod_cuts(mce_cuts)
+        depot.write_object(cuts_partial, tag=params.get('tag_partial'), tod=tod,
+                           make_dirs = True,
+                           force=True)
+    moby2.tod.fill_cuts(tod, cuts_partial, extrapolate = False, no_noise = no_noise)
+    tod.cuts = cuts_partial
+
+    # REMOVE MEAN
+    tic4 = time.time()
+    if params.get("remove_median", True): moby2.tod.remove_median(tod)
+    else: moby2.tod.remove_mean(tod)
+    if params.get("detrend", False): moby2.tod.detrend_tod(tod)
+    if params.get("remove_filter_gain", False): moby2.tod.remove_filter_gain(tod)
+
+    # DOWNSAMPLE
+    tic6 = time.time()
+    n_downsample = params.get("n_downsample")
+    if n_downsample is not None:
+        tod = tod.copy(resample=2**n_downsample, resample_offset=1)
+        logger.trace(0, "Downsampling done")
+
+    # FIND PATHOLOGIES
+    tic7 = time.time()
+    pa = pathologies.Pathologies(tod, pathop, noExclude = True)
+    err = pa.findPathologies()
+    logger.trace(0, "err = %d"%err)
+    if err == 0:
+        depot.write_object(pa, tag=params.get('tag_patho'), force=True, tod=tod,
+                           make_dirs=True)
+    logger.trace(0, "Pathologies done")
+
+    toc = time.time()
+    dt1 = (tic2 - tic1) / 60
+    dt2 = (tic3 - tic2) / 60
+    dt3 = (tic4 - tic3) / 60
+    dt4 = (tic5 - tic4) / 60
+    dt5 = (tic6 - tic5) / 60
+    dt6 = (tic7 - tic6) / 60
+    dt7 = (toc  - tic7) / 60
+
+timefile = params.get('timefile')
+if timefile is not None:
+    timefile = os.path.join(params.get("outdir","."),timefile)
+    f = open(timefile, 'a')
+    f.write('%4.2f  %4.2f  %4.2f  %4.2f  %4.2f  %4.2f  %4.2f  '%(dt1, 
+             dt2, dt3, dt4, dt5, dt6, dt7))
+    f.close()

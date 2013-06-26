@@ -1,0 +1,58 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+import moby2
+import sys
+import os
+from moby2.util.database import TODList
+from moby2.scripting.products import get_filebase
+fb = get_filebase()
+
+params = moby2.util.MobyDict.from_file(sys.argv[1])
+
+todlist = params.get('source_scans')
+tag_cuts = params.get('tag_out')
+tag_planet = params.get('tag_planet')
+tag_cmb = params.get('tag_cmb')
+depot_path = params.get('depot')
+
+depot = moby2.util.Depot(depot_path) 
+todList = TODList.from_file(todlist)
+
+for obs in todList:
+    try:
+        filename = fb.filename_from_name(obs, single=True)
+        params_loadtod = {
+            'filename':filename,
+            'read_data':False,
+            }
+        tod = moby2.scripting.get_tod(params_loadtod)
+        cmbPath = depot.get_full_path( moby2.TODCuts, tag=tag_cmb, tod=tod)
+	print('%s exists: %r' %(cmbPath, os.path.exists(cmbPath)))
+        if not os.path.exists( cmbPath ):
+            cutsPath = depot.get_full_path( moby2.TODCuts, tag=tag_cuts, tod=tod)
+            planetPath = depot.get_full_path(
+                moby2.TODCuts, tag=tag_planet, tod=tod)
+	    print('%s exists: %r' %(cutsPath, os.path.exists(cutsPath)))
+            if os.path.exists( cutsPath ):
+                cuts = depot.read_object( moby2.TODCuts,
+                                          tag = tag_cuts,
+                                          tod = tod)
+                
+                if os.path.exists( planetPath ):
+                    planetcuts = depot.read_object(moby2.TODCuts,
+                                                   tag = tag_planet,
+                                                   tod = tod )
+                    cuts.merge_tod_cuts( planetcuts )
+                    
+                    
+		depot.write_object( cuts,
+				    tag = tag_cmb,
+				    force=True,
+				    tod=tod,
+				    make_dirs=True )
+    except:
+        print('Failed for ', obs)
+        pass

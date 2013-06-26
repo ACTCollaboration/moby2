@@ -1,0 +1,15 @@
+#
+# Copy in some params files and stuff
+#
+PYTHON ?= python
+MOBY2_DIR = $(shell $(PYTHON) -c 'from __future__ import print_function; import moby2, os; print(os.path.split(moby2.__file__)[0])')
+
+moby2_deps:
+	-rm -r _moby2/params
+	cp -r $(MOBY2_DIR)/data/params _moby2/
+
+install: html
+	-mkdir _install _install/html/
+	cp -r _build/html/* _install/html/
+
+.PHONY: moby2_deps moby2_params

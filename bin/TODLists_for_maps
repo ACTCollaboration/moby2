@@ -1,0 +1,84 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+import moby2, sys, numpy, ephem, os
+from moby2.scripting.pathologies_tools import pathoList, get_pwv
+from moby2.util.database import TODList
+from moby2.instruments import actpol
+from moby2.util import ctime as ct
+from moby2.scripting.products import get_filebase
+np = numpy
+
+fb = get_filebase()
+
+today = ct.time
+
+ctime_start = ("2013-07-01 19:40:00",
+               ct.to_string( ct.time.time(),
+                             format = '%Y-%m-%d' )+" 00:00:00")
+
+params = moby2.util.MobyDict.from_file(sys.argv[1])
+cpar = moby2.util.MobyDict.from_file(params.get('cutparams'))
+obs_details = params.get("obs_details", ["deep6"])
+array = params.get("array", "ar1")
+
+config_file = params.get('manifest_conf', None)
+db = actpol.TODDatabase(config_file)
+
+
+pl = pathoList( os.path.join(cpar.get("outdir"),cpar.get("report")+".db") )
+pl.addPWV2results()
+pl.addEphem()
+Ndata = pl.ndata
+if params.get("todList") is not None:
+    presel = pl.selectFromTODList(params.get("todList"))
+else: presel = None
+sel = pl.selectGoodTODs(params=params.get("selParams",{}), preselection=presel)
+
+print('%i TODs have been processed by the cuts package' %pl.ndata)
+todList_db = TODList(pl.data["todName"][sel])
+print('%i TODs have been discarded due to PWV > 3mm or less than 100 live detectors' %( Ndata - len( todList_db ) ))
+
+
+outDir = params.get("outDir", ".")
+if not(os.path.isdir(outDir)): os.makedirs(outDir)
+
+include_time = np.loadtxt(params.get('include_time'), dtype=int )
+
+for obs_detail in obs_details:
+    db = actpol.TODDatabase(config_file)
+    print("Selecting TODs for %s" %obs_detail)
+    outfile = "selectedTODs_%s.txt" %obs_detail
+    outfile = os.path.join(outDir, outfile)
+    ids = db.select_tods(obs_detail=obs_detail, ctime_start=ctime_start,
+                         array=array)
+    
+    lines = ['# TOD\thour(UTC)\taltitude\tazimuth\tPWV\tcut_status\n']
+    for id in ids:
+        flag = 0
+        if id.basename is not None and id.datafile_id is not None:
+            if id.basename in pl.data['todName']: flag += 1
+            time_range = any( [lower <= id.ctime <= upper
+                          for (lower, upper) in include_time] )
+            if id.basename in todList_db and time_range: flag += 1
+            try:
+                pwv = get_pwv([id.ctime], saturate=False)
+                if pwv < 0: pwv = -1
+            except:
+                pwv = -1
+#            pwv = max( get_pwv([id.ctime], saturate=False), -1 )
+            lines.append( '%s\t%.2f\t%.2f\t%.2f\t%.2f\t%s\n'
+                          %(id.basename,
+                            ( (id.ctime % 86400.) / 3600),
+                            id.mean_alt,
+                            ( (id.max_az - id.min_az ) / 2 ),
+                            ( pwv ),
+                            flag )
+                          )
+
+    f = open(outfile, 'w')
+    f.writelines(lines)
+    f.close()
+                

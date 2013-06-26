@@ -1,0 +1,47 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+import moby2, os, sys
+
+class Calibration(object):
+    def __init__(self, cal, calRMS, row, col):
+        self.ff = moby2.util.MobyDict.fromkeys(["row","col","cal","calRMS"])
+        self.ff["row"] = list(row)
+        self.ff["col"] = list(col)
+        self.ff["cal"] = list(cal)
+        self.ff["calRMS"] = list(calRMS)
+    def writeToPath(self, path):
+        self.ff.write(os.path.join(path, "calib.txt"))
+        
+
+params = moby2.util.MobyDict.from_file( sys.argv[1] )
+depot = moby2.util.Depot(params.get('depot'))
+
+obsnames = []
+f = open(params['todList'])
+for l in f:
+    if l[0] != '#':
+        obsnames.append(l.split('\n')[0].split()[0])
+f.close()
+
+
+for obs in obsnames:
+    print("Calibrating %s"%(obs.split("/")[-1]))
+    try:
+        tod = moby2.TOD.from_dirfile(obs, read_data = False, end = -1000)
+        iv = moby2.detectors.IVCalibration.for_tod(tod.info)
+        iv_mask, resp = iv.get_property('dac_to_pW', det_uid=tod.det_uid)
+        cal = moby2.detectors.RelCal.from_dict(params.get("flatfield"))
+        ff_mask, ffval = cal.get_property('cal', det_uid = tod.det_uid, default=1.)
+        _, ffRMS = cal.get_property('calRMS', det_uid = tod.det_uid, default=1.)
+        calib = resp * ffval
+        calSel = ff_mask * iv_mask * ~(resp==0.0)
+        rows, cols = tod.info.array_data.get_property( ['row','col'],
+                                det_uid = tod.det_uid)
+        for c in params.get("inverted"):
+            calib[cols == c] *= -1
+        calObj = Calibration(calib[calSel], ffRMS[calSel], rows[calSel], cols[calSel])
+        depot.write_result(calObj, params.get("tag"), tod = tod, force = params["force"])
+    except:
+        print("Failed")

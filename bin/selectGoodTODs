@@ -1,0 +1,18 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+import os, sys
+from moby2.scripting.pathologies_tools import pathoList
+from moby2.util import MobyDict
+
+params = MobyDict.from_file(sys.argv[1])
+datafile = os.path.join(params.get("outdir","./"),"%s.db"%params.get("report"))
+outfile = "selTODs_%s.txt"%params.get("tag_out")
+
+sp = params.get("selParams",{"liveDets":{"gt":100},"PWV": {"lt":3}})
+
+pl = pathoList(datafile)
+pl.addPWV2results()
+sel = pl.selectGoodTODs(sp)
+pl.outputTODList(outfile,sel)

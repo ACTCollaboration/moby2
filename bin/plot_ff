@@ -1,0 +1,67 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+import os
+# from matplotlib import use as matplotlib_use
+# matplotlib_use('Agg')
+import moby2.util
+import numpy as np
+from moby2.analysis.tod_ana import visual as v
+
+from optparse import OptionParser
+
+o = OptionParser(usage="%prog [options] param_file [TOD,...]")
+o.add_option('-v','--verbosity',type=int,default=None)
+o.add_option('-t','--tag',default=None)
+o.add_option('-i','--instrument',default='actpol')
+o.add_option('-a','--array',default=None)
+o.add_option('-y','--year',default=None)
+o.add_option('-l','--lim',default=None)
+o.add_option('--lmin',default=None)
+o.add_option('--lmax',default=None)
+o.add_option('-o','--output-prefix',default='.')
+o.add_option('-p', '--path', default=None)
+opts, args = o.parse_args()
+
+print(opts)
+# if len(args) < 1:
+#     o.error("Parameter file should be given as first argument.\n")
+
+ff_name = 'ff_%s.dict' %opts.tag
+if opts.path is not None:
+    ff_name = os.path.join(opts.path, opts.year, ff_name)
+ff = moby2.util.MobyDict.from_file( ff_name )
+
+# cal = np.zeros(1056)
+# cal[ff["det_uid"]]=ff["cal"]
+det_uid = np.asarray(ff['det_uid'], dtype=int)
+cal = np.asarray(ff['cal'], dtype=float)
+stable = np.asarray(ff['stable'], dtype=int)
+
+print(opts.lim)
+if opts.lim is not None:
+    lim = np.float(opts.lim)
+    pmin = 1./lim
+    pmax = lim
+elif opts.lmin is not None:
+    pmin = np.float(opts.lmin)
+    pmax = np.float(opts.lmax)
+else:
+    pmin = cal.min()
+    pmax = cal.max()
+
+print(os.path.join(
+    opts.output_prefix,'ff_%s_cal.png' %opts.tag))
+v.array_plots(cal, det_uid,
+             instrument=opts.instrument, season=opts.year, array=opts.array,
+             pmin=pmin, pmax=pmax, title = 'Flatfield %s' %opts.tag,
+             display='save', save_name=os.path.join(
+        opts.output_prefix,'ff_%s_cal.png' %opts.tag) )
+
+v.array_plots(stable, det_uid,
+              title = 'Stable %s' %opts.tag,
+              instrument=opts.instrument, season=opts.year, array=opts.array,
+              display='save', save_name=os.path.join(
+        opts.output_prefix,'ff_%s_stable.png' %opts.tag) )
+

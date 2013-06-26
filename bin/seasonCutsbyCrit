@@ -1,0 +1,56 @@
+#!/usr/bin/env python 
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+import moby2
+from moby2.util.database import TODList
+from moby2.analysis import pathologies
+import sys
+import os
+
+
+paramFile = sys.argv[1]
+params = moby2.util.MobyDict.from_file(paramFile)
+
+
+todlist = TODList.from_file( params.get('todlist') )
+Ntods = len(todlist)
+depot = moby2.util.Depot(params.get('depot'))
+
+criteria = {}
+
+for obs in todlist:
+    try:
+        tod = moby2.TOD.from_dirfile(obs,read_data = False, end = -1000)
+    except:
+        Ntods -= 1
+        print("Failed")
+        continue
+    pathopath = depot.get_full_path(pathologies.Pathologies,
+                          tod = tod, tag = params['tag_patho'])
+    if os.path.exists(pathopath):
+        pa = depot.read_object(pathologies.Pathologies,
+                               tod = tod, tag = params['tag_patho'],
+                               options={"tod":tod})
+        pa.makeNewSelections()
+        
+        for k in pa.activeLiveKeys:
+            if k in criteria: criteria[k] += pa.crit[k]['sel'].sum()
+            else: criteria[k] = pa.crit[k]['sel'].sum()
+        for k in pa.activeDarkKeys:
+            if k in criteria: criteria[k] += pa.crit[k]['sel'].sum()
+            else: criteria[k] = pa.crit[k]['sel'].sum()
+    else: Ntods -= 1
+
+
+lines = []
+lines.append( "Fraction of detectors that passed the criteria:\n" )
+Ndets = pa.dets.size
+Ntot = float(Ndets*Ntods)
+for k in list(criteria.keys()):
+    lines.append( "   %s: %.2f\n" %(k, criteria[k]/Ntot) )
+
+f = open(params.get('outfile'),'w')
+f.writelines(lines)
+f.close()

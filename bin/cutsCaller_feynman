@@ -1,0 +1,49 @@
+#!/usr/bin/python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+from moby2.util import MobyDict
+from moby2.util.database import TODList
+import sys, os, time
+
+par = MobyDict.from_file(sys.argv[1])
+
+nproc = par.get("nproc", 5)
+outdir = par["outdir"]
+depot_file = os.path.join(outdir,par["report"]+".db")
+runtime = par.get("runtime",50)
+
+if not(os.path.isdir(outdir)): os.makedirs(outdir)
+tl = TODList.from_file(par["source_scans"])
+if os.path.isfile(depot_file): tl -= TODList.from_file(depot_file)
+if os.path.isfile(par["reject_depot"]): tl -= TODList.from_file(par["reject_depot"])
+N = len(tl)
+if N < nproc: nproc = 1
+NN = float(N)/nproc
+
+print("Processing %d TODs"%N)
+
+for n in range(nproc):
+    end = int((n+1)*NN)
+    if n+1==nproc: end = N
+    tln = TODList(tl[int(n*NN):end])
+    tln.to_file("%s/todList_%02d.txt"%(outdir,n))
+    par["source_scans"] = "%s/todList_%02d.txt"%(outdir,n)
+    par["timefile"] = "timefile_%02d.txt"%n
+    par["errfile"] = "errfile_%02d.pickle"%n
+    par.write("%s/cutparams_%02d.par"%(outdir,n))
+    f = open( '%s/submitjob_%02d.sh' %(outdir,n), 'w' )
+    f.write( '#!/bin/sh\n' )
+    f.write( '#PBS -N cuts_%02d\n' %n )
+    f.write( '#PBS -l ncpus=1,cput=%i:00:00,pmem=4gb\n' %runtime)
+    f.write( '#PBS -joe\n' )
+    f.write( '#PBS -V\n' )
+    f.write( 'source /mnt/act2/lmaurin/code/moby2/moby2_env\n' )
+    f.write( 'cd /mnt/act2/lmaurin/cuts/%s\n' %par['report'] )
+    f.write( 'get_cuts $par1\n' )
+    f.close()
+    os.system("/usr/bin/qsub -v par1=%s/cutparams_%02d.par %s/submitjob_%02d.sh\n"
+              %(outdir,n,outdir,n) )
+    if n == 0: time.sleep(10)
+

@@ -1,0 +1,39 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+from moby2.util import MobyDict
+from moby2.util.database import TODList
+import sys, os, time
+
+par = MobyDict.from_file(sys.argv[1])
+
+nproc = par.get("nproc", 5)
+outdir = par["outdir"]
+depot_file = os.path.join(outdir,par["report"]+".db")
+reject_depot = par.get("reject_depot",None)
+
+if not(os.path.isdir(outdir)): os.makedirs(outdir)
+tl = TODList.from_file(par["source_scans"])
+if os.path.isfile(depot_file): tl -= TODList.from_file(depot_file)
+if reject_depot is not None and os.path.isfile(par["reject_depot"]): 
+    tl -= TODList.from_file(par["reject_depot"])
+N = len(tl)
+if N < nproc: nproc = 1
+NN = float(N)/nproc
+
+print("Processing %d TODs"%N)
+
+for n in range(nproc):
+    end = int((n+1)*NN)
+    if n+1==nproc: end = N
+    tln = TODList(tl[int(n*NN):end])
+    tln.to_file("%s/todList_%02d.txt"%(outdir,n))
+    par["source_scans"] = "%s/todList_%02d.txt"%(outdir,n)
+    par["timefile"] = "timefile_%02d.txt"%n
+    par["errfile"] = "errfile_%02d.pickle"%n
+    par.write("%s/cutparams_%02d.par"%(outdir,n))
+    os.system("nohup get_cuts %s/cutparams_%02d.par &\n"%(outdir,n))
+    if n == 0: time.sleep(10)
+

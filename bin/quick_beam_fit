@@ -1,0 +1,208 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+"""
+Do elliptical gaussian fits to planet maps, summarize, plot.
+"""
+
+import glob
+import os
+import sys
+
+from moby2.util.noninteractive_plots import noshow
+import moby2
+
+from moby2.analysis import beam_ana
+
+import pylab as pl
+
+class PlotCursor:
+    def __init__(self, x, y, fig_kw):
+        self.x0 = x
+        self.y0 = y
+        self.y = y
+        self.dy = -.05
+        self.fig_kw = fig_kw
+    def print_line(self, text):
+        pl.figtext(self.x0, self.y, text, **self.fig_kw)
+        self.y += self.dy
+
+from optparse import OptionParser
+o = OptionParser(usage="%prog [options] param_file [map_file,...]")
+#o.add_option('-v','--verbosity',type=int,default=1)
+o.add_option('-i','--input-prefix',default=None)
+o.add_option('-o','--output-prefix',default=None)
+o.add_option('-u','--update',default=None,type=int)
+o.add_option('-t','--tag',action='append',nargs=2, default=[])
+#o.add_option('-i','--interactive-errors',action='store_true')
+opts, args = o.parse_args()
+
+if len(args) < 1:
+    o.error("Provide a parameters file as first argument.")
+
+params = moby2.util.MobyDict.from_file(args[0])
+if opts.output_prefix is not None:
+    params.set_deep(('moby_options', 'output_prefix'), opts.output_prefix)
+if opts.input_prefix is not None:
+    params.set_deep(('moby_options', 'input_prefix'), opts.input_prefix)
+
+tags = {}
+for k,v in opts.tag:
+    tags[k] = v
+
+# Create output folder
+outputm = moby2.scripting.OutputFiler(
+    prefix=params.get_deep(('moby_options', 'output_prefix')))
+inputm = moby2.scripting.OutputFiler(
+    prefix=params.get_deep(('moby_options', 'input_prefix')),
+    create_missing=False)
+
+# Get list of maps and basenames.
+basenames, map_files = beam_ana.util.get_map_list(
+    params['source_maps'], args=args[1:])
+
+# Set pol_type...
+map_files = [m.format(pol_code='I', **tags) for m in map_files]
+
+# Default plotting opts...
+popts = {
+    'plot_file': None,
+    'zoom': 6.,
+    'center': True,
+    'scale': 'log',
+    'rescale': True,
+}
+popts.update(params.get('output', {}))
+
+if popts['plot_file'] is not None:
+    pl.gcf().set_size_inches(6., 5.)
+    #pl.subplots_adjust()
+
+# Prepare output
+if popts.get('summary_file') is not None:
+    fout = open(outputm.get_filename(popts['summary_file']), 'w')
+else:
+    fout = open('/dev/null', 'w')
+
+max_len = max([len(a) for a in basenames])
+str_form = '%%-%is' % max_len
+
+pfile = params.get_deep(('output', 'pickle_file'))
+
+# Re-use fit results if they're found in the .bol?
+skip_existing = params.get_deep(('output', 'skip_existing'))
+# (Re-)write the bol to include only the analysis from listed objects?
+reset_output = params.get_deep(('output', 'reset_output'))
+
+# Do we have and want to use the existing fit output?
+if os.path.exists(pfile) and (skip_existing or not reset_output):
+    # Load existing results
+    bol_in = beam_ana.BeamObsList(pfile)
+else:
+    # Get an empty.
+    bol_in = beam_ana.BeamObsList()
+
+# Write new results to bol, which may be the same object as bol_in
+if reset_output:
+    bol = beam_ana.BeamObsList()
+else:
+    bol = bol_in
+
+header = str_form % '#' + ' '
+header += ' peak_x  peak_y       peak_h  '\
+    'fwhm_a  fwhm_b   omega_g    angle  baseline    noise'
+print(header)
+fout.write(header + '\n')
+
+for im in range(len(basenames)):
+    basename = basenames[im]
+    reuse = False
+    if skip_existing:
+        # Try to grab the result from the input.
+        if len(bol_in) > 0:
+            bol_i = (bol_in.get('init', 'basename') == basename).nonzero()[0]
+            if len(bol_i) > 0:
+                bo = bol_in[bol_i[0]]
+                ok = bo['gaussian']['ok']
+                reuse = True
+
+    if not reuse:
+        # Analyze
+        bo = beam_ana.BeamObs(mapfile=map_files[im])
+
+        # Add in basename, you earned it.
+        bo['init']['basename'] = basename
+    
+        # Get database?
+        if params.get_deep(('output', 'add_tod_info')):
+            bo.findInfo()
+
+        # Trim the map?
+        extract_params = params.get_deep(('source_maps', 'extract'))
+        if extract_params is not None:
+            bo.map = bo.map.extract(*extract_params)
+        # Fit
+        ok = bo.fit()
+
+    # Replace in bol.
+    bol_i = []
+    if len(bol) > 0:
+        bol_i = (bol.get('init', 'basename') == basename).nonzero()[0]
+    if len(bol_i) == 0:
+        bol.append(bo)
+    else:
+        bol[bol_i[0]] = bo
+
+    if not ok:
+        line = '# ' + str_form % basename
+        print(line)
+        fout.write(line + '\n')
+        if not 'gaussian' in bo:
+            bo['gaussian'] = {}
+        bo['gaussian']['ok'] = False
+        continue
+
+    ana = bo['gaussian']
+    ana['ok'] = ok
+
+    # Analysis output
+    line = str_form % basename + ' '
+    line += '{center[0]:7.4f} {center[1]:7.4f} {amp:12.4e} '\
+        '{fwhm_a:7.4f} {fwhm_b:7.4f} {solid_angle:10.3e} '\
+        '{angle:7.2f} {level:10.3e}'.format(**bo['gaussian'])
+    line += '{rms:10.3e}'.format(**bo['noise'])
+
+    print(line)
+    fout.write(line + '\n')
+
+    # Plots
+    if not reuse and popts['plot_file'] is not None:
+        beam_ana.plot_beam_image(bo.map, beam_obs=bo, title=basename,
+                                 params=popts)
+        
+        text_args = {'color': 'w'}
+        text_args.update(popts.get('text_opts', {}))
+
+        pc = PlotCursor(0.14, 0.8, fig_kw=text_args)
+        pc.print_line('FWHM_A = %.3f\''% (ana['fwhm_a']*60))
+        pc.print_line('FWHM_B = %.3f\''% (ana['fwhm_b']*60))
+        amp_str = popts.get('peak_fmt', '%.4e') % \
+            (ana['amp'] * popts.get('peak_scalar',1))
+        #pc.print_line('Peak = %.4f K' % (ana['amp']/1e6))
+        pc.print_line('Peak = %s' % amp_str)
+        pc.print_line('$\Omega_G$ = %.1f nsr'% (ana['solid_angle']*1e9))
+        
+        codes = {'basename': basename, 'map_idx': im}
+        pfilename = outputm.get_filename(popts['plot_file'], data=codes)
+        pl.savefig(pfilename)
+        pl.clf()
+
+pfile = params.get_deep(('output', 'pickle_file'))
+if pfile is not None:
+    bol.write(outputm.get_filename(pfile), force=True)
+
+
+    
+    

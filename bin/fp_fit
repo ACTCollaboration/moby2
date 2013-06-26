@@ -1,0 +1,380 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+USAGE = """%prog [options] [param_file, tod]
+
+Analyze a planet observation TOD to determine locations of detectors
+in the focal plane.
+
+Also fits time constants.  The time-stream fit can be based on a
+template, a previous fit, or a rough fit based on making a quick map.
+
+Use a params file like fp_fit.in.  A batch of TODs can be 
+"""
+
+import moby2
+from moby2.analysis import fp_fit
+from moby2.util.log import logger
+
+import numpy as np
+
+import os, sys
+from optparse import OptionParser
+
+# merge_* functions recombine results returned through MPI.
+
+def merge_fits(all_fits):
+    det_uid = np.hstack([fit.det_uid for fit in all_fits])
+    current_fits = fp_fit.FPFitFile(det_uid=det_uid)
+    for fits in all_fits:
+        mask, idx = fits.get_index(det_uid)
+        for i in mask.nonzero()[0]:
+            row = fits.get_row(idx[i])
+            for k in row:
+                getattr(current_fits, k)[i] = row[k]
+    return current_fits
+
+def merge_results(all_fits):
+    all_fits = [f.get_struct_db() for f in all_fits if len(f)>0]
+    keys = all_fits[0].dtype.names
+    values = [np.hstack([f[k] for f in all_fits]) for k in keys]
+    formats = all_fits[0].formats
+    return moby2.util.StructDB.from_data(list(zip(keys, values)), formats=formats)
+
+
+if __name__ == '__main__':
+    o = OptionParser(usage=USAGE)
+    o.add_option('-v','--verbosity',type=int,default=1)
+    o.add_option('-o','--output-prefix',default=None)
+    o.add_option('-i','--interactive-errors',action='store_true')
+    opts, args = o.parse_args()
+
+    # Determine parameter file name
+    if len(args) >= 1:
+        par_file = args[0]
+    else:
+        par_file = 'fp_fit.dict'
+
+    logger.trace(2, 'Using config file %s' % par_file)
+    params = moby2.util.MobyDict.from_file(par_file)
+
+    for k in ['fp_op_settings']:
+        if '_execcfg' in params.get(k, {}):
+            params[k] = moby2.scripting.execcfg.InputChooser().\
+                get_config(params[k]['_execcfg'])
+
+    if opts.output_prefix is not None:
+        params.set_deep(('moby_options', 'output_prefix'), opts.output_prefix)
+
+    if opts.verbosity is not None:
+        params.set_deep(('moby_options', 'verbosity'), opts.verbosity)
+
+    if opts.interactive_errors:
+        moby2.util.debugger.interactive(True)
+
+    use_MPI = params.get_deep(('moby_options', 'use_MPI'), False)
+    mpi = moby2.scripting.MobyMPI(use_MPI)
+
+    # Init ephem
+    moby2.pointing.set_bulletin_A()
+
+    outputm = moby2.scripting.OutputFiler(
+        prefix=params.get_deep(('moby_options', 'output_prefix')))
+
+    logger.set_level(params.get_deep(('moby_options', 'verbosity')))
+    logger.set_file(outputm.get_filename(
+            params.get_deep(('moby_options', 'log_file'))))
+    if params.get_deep(('moby_options', 'log_exceptions'), False):
+        logger.hook_exceptions()
+
+    # Prepare any summary objects?
+    summary_results = {'fp_collection': [],
+                       'template_fits': []}
+
+    # Get TOD list and start spinning
+    tod_files = moby2.scripting.products.get_tod_list(params['source_tods'], args[1:])
+
+    # Load special det_uid list?
+    det_uid_args = params['source_tods'].get('det_uid')
+    if det_uid_args is not None:
+        # Cheating
+        dets = moby2.detectors.DetectorList.from_dict(det_uid_args[1])
+        params.set_deep(('source_tods', 'load_args', 'det_uid'), dets.det_uid)
+
+    # Prefetching?
+    if params['source_tods'].get('prefetch', False):
+        kw_args = [params.get_deep(('source_tods', 'load_args'), {})
+                   for f in tod_files]
+        prefetcher = moby2.util.TODQueuer(tod_files, kw_args)
+    else:
+        prefetcher = None
+
+    logger.trace(0, 'Processing %i TOD basenames' % (len(tod_files)))
+
+    for tod_file in tod_files:
+
+        logger.trace(1, 'TOD=%s' % tod_file)
+
+        fptod = None
+
+        # Get info for this tod_file without loading the data
+        tod_info = moby2.scripting.get_tod_info({'filename': tod_file})
+
+        #
+        # Run through various steps, updating "current_fits".
+        #
+        current_fits, current_template = None, None
+
+        for this_step_opts in params['fp_operations']:
+
+            step_type = this_step_opts['type']
+            step_name, step_default_key = [this_step_opts.get(k, step_type) for k in
+                                           ['label', 'settings_label']]
+            step_opts = params.get('fp_op_settings', {}).get(step_default_key, {}).copy()
+            step_opts.update(this_step_opts)
+            
+            # Doing this syncing at the top of the loop makes other mpi code shorter
+            if mpi.size > 1:
+                # Broadcast current results from thread 0
+                current_fits, current_template = \
+                    mpi.comm.bcast((current_fits, current_template), 0)
+                # Let main thread do non-distributed jobs
+                if mpi.rank != 0 and not step_type in ['load_tod', 'fit_model',
+                                                       'coarse_find_peak']:
+                    continue
+
+            logger.trace(1, 'Operation: %s (%s)' % (step_name, step_type))
+
+            if step_type == 'load_tod':
+                # Load data
+                logger.trace(1, 'Loading %s' % tod_file)
+                if prefetcher == None:
+                    load_args = {'repair_pointing': True}
+                    load_args.update(step_opts.get('load_args', {}))
+                    load_args['filename'] = tod_file
+                    det_uid = load_args.get('det_uid')
+                    if det_uid == None:
+                        # Get them from tod_info somehow.
+                        det_uid = tod_info.array_data.select_outer(
+                            step_opts.get('select_dets', {}))
+                    if mpi.size > 1:
+                        # TOD data is paralellized.
+                        n_before = len(det_uid)
+                        det_uid = mpi.get_my_jobs(np.array(det_uid))
+                        logger.trace(1, 'Thread %i handling %i of %i detectors' %
+                                     (mpi.rank, len(det_uid), n_before))
+                    else:
+                        logger.trace(1, 'Selected %i detectors to load' % len(det_uid))
+                    load_args['det_uid'] = det_uid
+                    tod = moby2.scripting.get_tod(load_args)
+                else:
+                    tod = prefetcher.get_next()
+                
+                # Handle slipped pointing?
+                if step_opts.get('shift_pointing',0) != 0:
+                    A = max(0, step_opts['shift_pointing'])
+                    B = max(0, -step_opts['shift_pointing'])
+                    for v in [tod.ctime, tod.az, tod.alt, tod.enc_flags]:
+                        v[A:len(v)-B] = v[B:len(v)-A]
+                        
+                # Dummy fplane with single det on the boresight.
+                tod.fplane = moby2.pointing.FocalPlane([0.],[0.])
+
+                fptod = fp_fit.FPTOD(tod=tod, outputm=outputm, logger=logger)
+                outputm.data['basename'] = tod.info.name
+
+                logger.trace(2, 'Getting source coordinates')
+                fptod.compute_source_coords(
+                    source_name=step_opts.get('source_name'))
+
+                logger.trace(2, 'Preparing TOD')
+                if len(tod.data) > 0:
+                    fptod.preprocess(step_opts)
+
+            # Operations that initialize current_fits
+            elif step_type == 'coarse_find_peak':
+                cpe = fp_fit.CoarsePeakExtractor(
+                    step_opts, outputm=outputm, logger=logger)
+                step_output = cpe.fit_tod(fptod)
+                current_fits = step_output.get_fp_file()
+
+                if mpi.size > 1:
+                    current_fits = mpi.comm.gather(current_fits, 0)
+                    if mpi.rank == 0:
+                        current_fits = merge_fits(current_fits)
+
+            elif step_type == 'apply_friend_cuts':
+                current_fits = fp_fit.apply_friend_cuts(
+                    step_opts, current_fits, logger=logger)
+
+            elif step_type == 'apply_node_cuts':
+                current_fits = fp_fit.apply_node_cuts(
+                    step_opts, current_fits, logger=logger)
+
+            elif step_type == 'fit_model':
+                fp = fp_fit.FPModelFitter(step_opts, outputm=outputm)
+                fit_results = fp.fit_model_tod(fptod, current_fits,
+                                               opts=step_opts)
+                current_fits = fit_results.get_fp_file()
+
+                if mpi.size > 1:
+                    current_fits = mpi.comm.gather(current_fits, 0)
+                    fit_results = mpi.comm.gather(fit_results, 0)
+                    if mpi.rank == 0:
+                        current_fits = merge_fits(current_fits)
+                        fit_results = merge_results(fit_results)
+                else:
+                    fit_results = fit_results.get_struct_db()
+
+            elif step_type == 'apply_cuts':
+                current_fits = fp_fit.apply_cuts(step_opts, current_fits,
+                                                 tod_info=tod_info,
+                                                 logger=logger)
+
+            elif step_type == 'write_fit':
+                if not step_opts['filename'] is None:
+                    ofile = outputm.get_filename(
+                        step_opts['filename'], tod_info=tod_info)
+                    logger.trace(1, 'Writing fits to %s'%ofile)
+                    current_fits.write(ofile)
+                if not step_opts.get('plot_prefix') is None:
+                    ofile = outputm.get_filename(
+                        step_opts['plot_prefix']+'fp.png', tod_info=tod_info)
+                    logger.trace(1, 'Plotting fits to %s'%ofile)
+                    current_fits.plot_positions(ofile, title=tod_info.name)
+
+            elif step_type == 'read_fit':
+                ifile = outputm.get_filename(
+                    step_opts['filename'], tod_info=tod_info)
+                if params['source_tods'].get('skip_missing') and \
+                        not os.path.exists(ifile):
+                    logger.trace(2, 'No input fit %s' % ifile)
+                    break
+                logger.trace(2, 'Getting input fit %s' % ifile)
+                current_fits = fp_fit.FPFitFile.from_file(ifile)
+                
+            elif step_type == 'write_reduced':
+                red_fits = current_fits.copy(current_fits.ok.nonzero()[0])
+                ofile = outputm.get_filename(step_opts['filename'],
+                                             tod_info=tod_info)
+                step_kw = {}
+                for k in ['scale_amp']:
+                    if k in step_opts:
+                        step_kw[k] = step_opts[k]
+                red_fits.write_reduced(ofile, **step_kw)
+
+            elif step_type == 'write_fit_quality':
+                ofile = outputm.get_filename(
+                    step_opts['filename'], tod_info=tod_info)
+                if ofile != None:
+                    logger.trace(1, 'Writing fits to %s'%ofile)
+                    if ofile.endswith('fits'):
+                        fit_results.to_fits_table(ofile)
+                    else:
+                        fit_results.to_column_file(ofile)
+
+            elif step_type == 'fit_template':
+                tfit = fp_fit.FPTemplateFitter.from_params(
+                    step_opts, tod_info=tod_info)
+                ok, tp = tfit.fit(current_fits, step_opts)
+
+                # Generate modeled positions for detectors
+                det_uid = current_fits.det_uid
+                if step_opts.get('promote', True):
+                    det_uid = tfit.template.det_uid
+                template_proj = tfit.get_modeled(det_uid=det_uid)
+
+                ppref = step_opts.get('plot_prefix')
+                if ppref is not None:
+                    ppref = outputm.get_filename(ppref, tod_info=tod_info)
+                    title = tod_info.basename
+                    tfit.make_plots(current_fits, template_proj, ppref, title=title)
+
+                logger.trace(2, 'Template shift params: %s' % (repr(tp)))
+                if step_opts.get('replace', True):
+                    current_fits = template_proj
+                current_template = template_proj
+                summary_results['template_fits'].append(
+                    (tod_info.basename, tfit))
+                if step_opts.get('write_fit_params'):
+                    tfit.write_fit_list(outputm.get_filename(step_opts['write_fit_params'],
+                                                             tod_info=tod_info),
+                                        [tod_info.basename], [tfit], format='txt')
+
+            elif step_type == 'apply_template_cuts':
+                ok, (x0, y0) = current_template.get_property(
+                    ['x0', 'y0'], det_uid=current_fits.det_uid)
+                dx, dy = current_fits.x0 - x0, current_fits.y0 - y0
+                distance = (dx**2 + dy**2)**.5
+                if not step_opts.get('max_offset') is None:
+                    current_fits.ok *= ok * \
+                        (distance <= step_opts['max_offset'] * np.pi/180)
+                tfit = [v for (k,v) in summary_results['template_fits']
+                        if k == tod_info.basename][0]
+                if not tfit.check_result(step_opts):
+                    logger.trace(1, 'Template fit failed parameter range check; '
+                                 'marking all positions invalid.')
+                    current_fits.ok *= False
+                
+            elif step_type == 'shift_fit':
+                dx, dy = step_opts.get('value')
+                current_fits.x0[current_fits.ok] += dx
+                current_fits.y0[current_fits.ok] += dy
+
+            else:
+                raise ValueError("Unknown step request '%s'" % step_type)
+
+        summary_results['fp_collection'].append(
+            (tod_info.basename, current_fits))
+
+    if mpi.rank != 0:
+        sys.exit(0)
+
+    for step_opts in params.get('fp_summary_operations', []):
+        step_type = step_opts.get('type')
+        logger.trace(0, 'Summary operation: %s' % step_type)
+
+        if step_type == 'summarize_fit_template':
+            ofile = outputm.get_filename(step_opts['filename'])
+            if ofile is not None:
+                basenames, template_fits = list(zip(*summary_results['template_fits']))
+                template_fits[0].write_fit_list(ofile,
+                                                basenames, template_fits,
+                                                format='fits')
+
+        elif step_type == 'average_fits':
+            collection = list(zip(*summary_results['fp_collection']))[1]
+            collection = [c for c in collection if not c is None]
+            aopts = step_opts
+            # Load a template to use
+            if aopts.get('template_source') is not None:
+                template = load_template(aopts['template_source'], tod_info)
+            else:
+                template = collection[0]
+            avg_fits, avg_shifts = fp_fit.FPFitFile.combine_fits(
+                collection, template, aopts)
+            # Write them?
+            ofile = outputm.get_filename(aopts.get('summary_output'),
+                                         tod_info=tod_info)
+            if ofile is not None:
+                logger.trace(1, 'Writing output to %s'%ofile)
+                avg_fits.write(ofile)
+            # Plot them?
+            opref = outputm.get_filename(aopts.get('plot_prefix'),
+                                         tod_info=tod_info)
+            if opref is not None:
+                logger.trace(2, 'Plotting to %s' % opref)
+                avg_fits.plot_positions(opref+'average.png', title='Average positions',
+                                        params=aopts.get('positions_plot',{}))
+                avg_fits.plot_rowcol_summaries(opref, tod_info.array_data)
+            # Write shifts of each file relative to template.
+            ofile = outputm.get_filename(aopts.get('shifts_output'),
+                                         tod_info=tod_info)
+            if ofile != None:
+                print(avg_shifts)
+
+        else:
+            raise Warning("Unknown step request '%s'" % step_type)
+

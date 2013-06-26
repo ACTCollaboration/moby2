@@ -1,0 +1,57 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+import moby2
+import os, sys
+
+USAGE="""%prog [options] file.fits [file2.fits, ...]
+
+Dumps FITS-encoded moby2 columnar data to ascii."""
+
+import optparse
+o = optparse.OptionParser(usage=USAGE)
+o.add_option('--dump-fields',action='store_true',help=
+             "Print list of data fields.")
+o.add_option('--fields',help=
+             "Comma-separated list of fields to tabulate.")
+o.add_option('--format', action='append', nargs=2, help=
+             "Set the format string for a column, e.g. --format name %-20s .")
+o.add_option('--no-header', action='store_true', default=False, help=
+             "Suppress header output.")
+o.add_option('-o','--output-file', help=
+             "Write to file instead of stdout.")
+o.add_option('-q','--quiet', action='store_true', help=
+             "Do not complain about missing header data.")
+o.add_option('-i','--hdu-index', default=1, type=int, help=
+             "Index of HDU to decode.")
+o.add_option('-d','--dataset', help="HDF5 dataset to decode.")
+o.add_option('-g','--group', help="HDF5 group to decode.")
+opts, args = o.parse_args()
+
+if not opts.fields is None:
+    opts.fields = opts.fields.split(',')
+
+if not opts.format is None:
+    opts.format = dict(opts.format)
+
+ofile = sys.stdout
+if not opts.output_file is None:
+    ofile = open(opts.output_file, 'w')
+
+if len(args) == 0:
+    o.error("No files specified. (Pass -h for usage.)")
+
+for filename in args:
+    ext = filename.split('.')[-1]
+    if ext in ['hdf', 'h5', 'hdf5']:
+        data = moby2.util.StructDB.from_hdf(filename, dataset=opts.dataset,
+                                            group=opts.group)
+    else:
+        data = moby2.util.StructDB.from_fits_table(filename, index=opts.hdu_index)
+    if opts.fields is not None:
+        data = moby2.util.StructDB.from_data(
+            [(k,data[k]) for k in opts.fields],
+            formats=data.formats)
+    data.to_column_file(ofile)
+    

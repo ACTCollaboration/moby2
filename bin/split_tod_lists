@@ -1,0 +1,36 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+import sys, os
+
+tod_list = sys.argv[1]
+N = int(sys.argv[2])
+
+name = tod_list.split('/')[-1].split('.')[0]
+dirname = name+'_split'
+try: os.mkdir(dirname)
+except: pass
+
+f = open(tod_list, 'r')
+obsnames = []
+nobs = 0
+for l in f:
+    if l[0] != '#':
+        obsnames.append(l)
+        nobs += 1
+f.close()
+
+N = (nobs+N-1) // N  # round n up to multiple of N.
+
+it = 0
+while len(obsnames) > 0:
+    filename = dirname + '/' + name + '_%02d.txt'%it
+    f = open(filename, 'w')
+    n = N
+    while (len(obsnames) > 0) and (n > 0):
+        f.write(obsnames[0])
+        n -= 1
+        del obsnames[0]
+    f.close()
+    it += 1

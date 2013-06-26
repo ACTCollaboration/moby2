@@ -1,0 +1,161 @@
+#!/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+from matplotlib import use as matplotlib_use
+matplotlib_use('Agg')
+
+def noshow(filename='_noshow.png'):
+    import pylab
+    pylab.savefig(filename)
+    pylab.clf()
+
+import moby2
+from moby2.scripting import  pathologies_tools
+import pickle, sys, time, os, numpy
+TODList = moby2.util.database.TODList
+from moby2.analysis.tod_ana.pathologies import Pathologies
+from moby2.scripting import products
+
+# MAIN RUN PARAMETERS 
+paramFile = sys.argv[1]
+params = moby2.util.MobyDict.from_file(paramFile)
+
+cpar = moby2.util.MobyDict.from_file(params.get('cutParams'))
+pathop = cpar['pathologyParams']
+
+newfile = params['newfile']
+
+source_scans = params['source_scans']
+outdir = os.path.abspath(params.get('outdir',"."))
+if not(os.path.isdir(outdir)): os.makedirs(outdir)
+timefile = os.path.join(outdir,params.get('timefile',"timefile.txt"))
+errfile = os.path.join(outdir,params.get('errfile',"err.picke"))
+rejected = os.path.join(outdir,params.get("rejectList","rejected.txt"))
+if not(os.path.isfile(timefile)): newfile = True
+
+tag_patho = params.get("tag_patho")
+depot = moby2.util.Depot(params.get("depot"))
+
+# Set up logging
+if params.get_deep(("moby_options","log_file")) is not None:
+    log_file = os.path.join(outdir,params.get_deep(("moby_options","log_file")))
+    params.set_deep(("moby_options","log_file"), log_file)
+logger = moby2.util.log.logger
+logger.init_from_params(params.get('moby_options', {}))
+
+###########################################################################################
+# Check previous runs
+if not(newfile) and not(os.path.isfile(timefile)): newfile = True
+
+# INITIALIZE ERROR LOG
+t = time.gmtime()
+runname = 'Cuts run %d-%d-%d'%(t[0], t[1], t[2])
+try:
+    f = open(errfile)
+    p = pickle.Unpickler(f)
+    errlog = p.load()
+    f.close()
+except:
+    errlog = {}
+    logger.trace(0, 'Creating new error log file (%s)'%errfile)
+    pass
+
+# INITIALIZE REPORT OBJECT
+report = pathologies_tools.reportPathologies( paramFile )
+
+# INITIALIZE LOG FILE
+if newfile and timefile is not None:
+    f = open(timefile, 'w')
+    f.write('# todName | LoadTOD | PlanetCut | RemoveSync | RemoveMean | '
+            'PartialCut | Downsample | Pathologies | Total\n')
+    f.close()
+
+
+# GET LIST OF TODS WITH PROPER SCANNING
+obsnames = TODList.from_file(source_scans)
+
+# REMOVE TODs ALREADY DONE
+if not(newfile) and os.path.isfile(report.depot_file):
+    done = TODList.from_file(report.depot_file)
+    obsnames -= done
+
+# REMOVE KNOWN BAD TODS
+if params.get("reject_depot",None) is not None:
+    rd = TODList.from_file(params["reject_depot"])
+    obsnames -= rd
+
+# ITERATE OVER TODS FROM LIST
+fb = moby2.scripting.get_filebase()
+logger.trace(0, 'Processing %i TODs' %len(obsnames))
+for obs in obsnames:
+    name = obs.split('/')[-1].split('\n')[0]
+    keys = list(errlog.keys())
+    if not(numpy.any(keys == name)):
+        errlog[name] = {runname: []}
+    else:
+        errlog[name][runname] = []
+    tic = time.time()
+    if timefile is not None:
+        f = open(timefile, 'a')
+        f.write('%s  '%name)
+        f.close()
+
+    if fb.filename_from_name(name,single=True) is None:
+        logger.trace(0, "The tod file cannot be found on the system")
+        errlog[name][runname].append("The tod file cannot be found on the system")
+        continue
+
+    try:
+        resp = products.get_calibration(
+            pathop["calibration"]["config"], tod=obs)
+        valid_calib = True
+    except Exception as err:
+        valid_calib = False
+        logger.trace(0, "%s"%err)
+        errlog[name][runname].append("%s"%err)
+
+
+
+    pathoResult = os.path.exists(
+        depot.get_full_path(Pathologies, tag=tag_patho, tod = obs) )
+    if (not(pathoResult) or params.get("forcePatho", False)) and valid_calib:
+        logger.trace(0,"PROCESSING CUTS FOR %s"%name)
+        out = os.popen('process_cuts %s %s'%(obs, paramFile))
+        for l in out: errlog[name][runname].append(l)
+    
+    pathoResult = os.path.exists(
+        depot.get_full_path(Pathologies, tag=tag_patho, tod = obs) )
+    if pathoResult and valid_calib:
+        try:
+            report.appendResult( obs )
+            out = 'Append successful'
+            newfile = False
+        except Exception as err:
+            out = 'Failed to append result: %s'%err
+            f = open(rejected, "a")
+            f.write("%s\n"%obs)
+            f.close()
+#            raise
+    else:
+        out = "Failed to process cuts"
+        f = open(rejected, "a")
+        f.write("%s\n"%obs)
+        f.close()
+    logger.trace(0, out)
+    errlog[name][runname].append(out)
+
+    toc = time.time()
+    dt = (toc - tic) / 60
+    logger.trace(0, 'It took %6.2g minutes for this TOD'%dt)
+    errlog[name][runname].append(out)
+    if timefile is not None:
+        f = open(timefile, 'a')
+        f.write('%4.2f\n'%dt)
+        f.close()
+    f = open(errfile, 'wb')
+    p = pickle.Pickler(f, 2)
+    p.dump(errlog)
+    f.close()
+

@@ -1,0 +1,62 @@
+#!/bin/env python                                                                    
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+import moby2
+import sys
+from moby2.instruments import actpol
+from moby2.util.database import TODList
+from moby2.scripting.products import get_filebase
+fb = get_filebase()
+
+params = moby2.util.MobyDict.from_file( sys.argv[1] )
+
+if params.get('suffix') is None:
+    raise ValueError('suffix for output file must be provided')
+else:
+    suffix = params.pop('suffix')
+
+if params.get('database') is not None:
+    db = actpol.TODDatabase(config_file=params.pop('database'))
+else:
+    db = actpol.TODDatabase()
+                            
+if params.get('arrays') is not None:
+    arrays = params.pop('arrays')
+else:
+    arrays = ['AR1', 'AR2', 'AR3']
+
+if params.get('year') is not None:
+    year = params.pop('year')
+else:
+    year = '2016'
+
+hwp = params.pop('hwp')
+
+filename_flag = 0
+datafile_id_flag = 0
+for ar in arrays:
+    outfile = year+'_'+ar+'_'+suffix+'.txt'
+    ids = db.select_tods(array=ar, **params)
+
+    tod_list = TODList()
+    for id in ids:
+        try:
+            filename = fb.filename_from_name(id.basename, single=True)
+            hwp_on = id.hwp_epoch != 'none' and id.hwp_epoch is not None
+            if filename == None: filename_flag += 1
+            if id.datafile_id == None: datafile_id_flag +=1
+            if filename != None and id.datafile_id != None and hwp == hwp_on:
+                tod_list.append(filename)
+        except:
+            pass
+    tod_list.to_file(outfile)
+
+print("TODs without filename: %i" %filename_flag)
+print("TODs without datafile_id: %i" %datafile_id_flag)
+
+
+
+
+

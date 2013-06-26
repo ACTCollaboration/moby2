@@ -1,0 +1,75 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+"""
+Script template.
+"""
+
+import sys
+import os
+from matplotlib import use as matplotlib_use
+if 1 or os.getenv('DISPLAY') is None or os.getenv('DISPLAY')=='':
+    matplotlib_use('Agg')
+    def noshow():
+        pl.savefig('_noshow.png')
+        pl.clf()
+
+import pylab as pl
+import numpy as np
+
+import moby2
+
+def output_filename(name, create_dirs=False):
+    global params
+    if name is None:
+        return None
+    fullname = params.get_deep(('output', 'prefix'), './') + name
+    if create_dirs:
+        path, base = os.path.split(fullname)
+        if path != '' and not os.path.exists(path):
+            os.makedirs(path)
+    return fullname
+
+
+#
+# Main
+#
+
+from optparse import OptionParser
+
+o = OptionParser(usage="%prog [options] param_file [args,...]")
+o.add_option('-v','--verbosity',type=int,default=1)
+o.add_option('-o','--output-prefix',default=None)
+o.add_option('-i','--interactive-errors',action='store_true')
+opts, args = o.parse_args()
+
+if len(args) < 1:
+    o.error("Parameter file should be given as first argument.\n")
+
+#
+# Load parameters, update them from command line as needed
+#
+
+params = moby2.util.MobyDict.from_file(args[0])
+if opts.output_prefix is not None:
+    params.set_deep(('output', 'prefix'), opts.output_prefix)
+
+if opts.verbosity is not None:
+    params.set_deep(('moby_options', 'verbosity'), opts.verbosity)
+
+if opts.interactive_errors:
+    moby2.util.debugger.interactive(True)
+
+# Get the main logger
+logger = moby2.util.log.logger
+logger.set_level(params.get_deep(('moby_options', 'verbosity')))
+logger.set_file(output_filename(params.get_deep(('moby_options', 'log_file'))))
+
+def trace(level, msg):
+    logger.trace(level, msg)
+
+# Save these parameters
+params.write_to_file(output_filename('params_in.par'))
+

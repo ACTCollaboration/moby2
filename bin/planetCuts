@@ -1,0 +1,934 @@
+#!/usr/bin/env python
+from __future__ import print_function
+from __future__ import absolute_import
+from past.builtins import basestring
+
+"""
+This script generates basic cuts for a planet TOD.
+"""
+
+import moby2
+import moby2.scripting.products as products
+
+import sys
+import os
+
+import numpy as np
+import pylab as pl
+
+
+def dets_remaining(tod, preface):
+    #d,r,c = tod.listUncut()
+    d = tod.cuts.get_uncut()
+    trace(3, '%s: %d detectors left uncut' % (preface, len(d)))
+    return len(d)
+
+
+def all_dets_plot(t, data, cal_vect=None, idx=None,
+                  title=None, notes=[],
+                  xlim=None, ylim=None, control_lims=3,
+                  xlabel=None, alpha=None):
+    if idx is None:
+        idx = np.arange(len(data))
+    if cal_vect is None:
+        cal_vect = np.ones(len(data))
+    if np.asarray(cal_vect).ndim == 0:
+        cal_vect = np.ones(len(data)) * cal_vect
+    if alpha is None:
+        alpha = max(.05, 1./len(idx)**.5)
+    t = t - t[0]
+    if xlim is not None:
+        s = (t>=xlim[0])*(t<xlim[1])
+        t = t[s]
+        data = data[:,s]
+    downs = max(1, len(data[0]) // 1000)  # always downsample!
+    data = cal_vect[:,None]*data[::,::downs]
+    hidden = len(idx)
+    if control_lims:
+        amps = data.max(axis=1) - data.min(axis=1)
+        max_amp = amps[idx].mean() + control_lims*amps[idx].std()
+        hidden = len(idx)
+        idx = idx[amps[idx]<max_amp]
+    hidden -= len(idx)
+    for j in idx:
+        pl.plot(t[::downs], data[j],#cal_vect[j]*data[j,::downs],
+                alpha=alpha)
+    if xlabel is None:
+        xlabel = 'Time (s)'
+    pl.xlabel(xlabel)
+    if ylim is not None:
+        pl.ylim(*ylim)
+    if title is not None:
+        pl.title(title)
+    for i,note in enumerate(notes + [
+            'Showing %i, hiding %i detectors.' %(len(idx), hidden)]):
+        pl.figtext(.5, .85-i*.04, note, ha='center')
+
+
+def array_plot(tod, c_param, mask=None, shift_pol=True, shift_freq=True,
+               _colorbar=True, **kwargs):
+    if mask is None:
+        mask = np.ones(len(c_param), bool)
+    ad = tod.info.array_data.to_struct_db(det_uid=tod.det_uid)
+    if not 'sky_x' in ad.dtype.names:
+        trace(0, 'array_plot cannot plot without sky_x/sky_y.')
+        return False
+
+    X, Y, P, F = [ad[k][mask] for k in ['sky_x', 'sky_y', 'sky_angle', 'nom_freq']]
+    freqs = sorted(list(set(F)))
+    for fi, f in enumerate(freqs):
+        Y += .02 * fi * (F==f)
+    X += (P >= 90) * .02
+    pl.scatter(X, Y, c=c_param[mask], **kwargs)
+    if _colorbar:
+        pl.colorbar()
+    return True
+
+
+#
+# Main
+#
+
+from optparse import OptionParser
+
+o = OptionParser(usage='%prog [options] param_file [TOD,...]')
+o.add_option('-v','--verbosity',type=int)
+o.add_option('-o','--output-prefix',default=None)
+o.add_option('-i','--interactive-errors',action='store_true')
+opts, args = o.parse_args()
+
+if len(args) < 1:
+    o.error('Parameter file should be given as first argument.\n')
+
+#
+# Load parameters, update them from command line as needed
+#
+
+params = moby2.util.MobyDict.from_file(args[0])
+if opts.output_prefix is not None:
+    # Append command line to prefix in config file.
+    params.set_deep(('output', 'prefix'),
+                    os.path.join(params.get_deep(('output', 'prefix'), ''),
+                                 opts.output_prefix))
+
+if opts.verbosity is not None:
+    params.set_deep(('moby_options', 'verbosity'), opts.verbosity)
+
+if opts.interactive_errors:
+    moby2.util.debugger.interactive(True)
+
+# Create output folder
+outputm = moby2.scripting.OutputFiler(
+    prefix=params.get_deep(('output', 'prefix')))
+
+# Create a log or whatever
+logger = moby2.util.log.get_logger()
+logger.init_from_params(params.get('moby_options'))
+
+def trace(level, msg):
+    logger.trace(level, msg)
+
+# Expand mind of pointing model
+user_config = moby2.util.get_user_config()
+moby2.pointing.set_bulletin_A(params=user_config.get('bulletin_A_settings'))
+
+pcut_par = moby2.util.MobyDict()
+pcut_par.update(params.get('planet_cuts', {}))
+
+depot = moby2.util.Depot(params.get_deep(('output', 'depot'), None))
+
+#
+# Loop over TODs, I guess.  You can pre-fetch.
+#
+
+tod_files = products.get_tod_list(params['source_tods'], args[1:])
+
+trace( 1, 'Processing %i TODs' % len(tod_files))
+for tod_i, tod_file in enumerate(tod_files):
+    trace(1, 'TOD %i is %s' % (tod_i, tod_file))
+
+    tod_info = moby2.scripting.get_tod_info({'filename':tod_file})
+    # Tell the output filer about that...
+    outputm.data.update(tod_info.get_dict())
+    outputm.data.update({'tod_i': tod_i})
+
+    # Save these parameters (once per TOD just in case)
+    par_out = params.get_deep(('output', 'params'), 'planetCuts.par')
+    params.write_to_file(outputm.get_filename(par_out))
+
+    pfile = outputm.get_filename(params.get_deep(('output', 'progress_file')))
+    if pfile is not None:
+        progress = moby2.util.ProgressDict(filename=pfile, aggressive=True)
+    else:
+        progress = moby2.util.ProgressDict(dummy=True)
+    progress['exit_code'] = 1
+    progress['exit_message'] = 'unexpected failure'
+    progress['mappable'] = False
+    progress['phase'] = 'init'
+
+    # Check for existence of cuts?
+    if params.get_deep(('planet_cuts', 'skip_existing')):
+        if np.all([depot.check_result(cls, tag, tod=tod_file) for cls, tag in 
+                   [(moby2.TODCuts, params['output']['position_tag']),
+                    (moby2.TODCuts, params['output']['cuts_tag'])]]):
+            progress['mappable'] = True
+            progress['exit_code'] = 0
+            msg = 'planetCuts result exists, skipping.'
+            progress['exit_message'] = msg
+            trace(0, msg)
+            continue
+
+    # Load pointing only (to get runfile...)
+    trace(2, 'reading pointing data from %s' % tod_file)
+    load_args = params.get_deep(('source_tods', 'load_args'),{}).copy()
+    load_args.update({'read_data': False, 'det_uid': [],
+                      'filename': tod_file})
+    tod = moby2.scripting.get_tod(load_args)
+    moby2.tod.repair_pointing(tod)
+    all_det_uid = tod.info.array_data.select_outer()
+    filter_gain = tod.info.mce_filter.gain()
+
+    # Use IV analysis?
+    iv_params = params.get_deep(('planet_cuts', 'iv_cuts'))
+    if iv_params is not None:
+        iv_analysis = products.get_iv_calibration(iv_params, tod.info)
+
+    trace(2, 'Getting pointing offsets and time constants for %s' % tod.info.name)
+    progress['phase'] = 'get pointing offset'
+    focal_plane = products.get_focal_plane(params['pointing'], tod=tod,
+                                           det_uid=all_det_uid)
+
+    progress['phase'] = 'get time constants'
+    time_const = products.get_time_constants(params['time_constants'], tod.info)
+
+    progress['phase'] = 'source identification'
+    
+    # Identify the source
+    trace(2, 'Finding sources for %s' % tod.info.name)
+    tod.fplane = focal_plane
+    good_pointing = tod.pointing_mask.nonzero()[0][0]
+    tod.alt[~tod.pointing_mask] = tod.alt[good_pointing]
+    tod.az[~tod.pointing_mask] = tod.az[good_pointing]
+    matched_sources = moby2.ephem.get_sources_in_patch(
+        tod=tod, source_list=params.get_deep(('planet_cuts', 'sources')),
+        add_source_list=params.get_deep(('planet_cuts', 'append_sources')))
+
+    # Store the names
+    progress['sources'] = [m[0] for m in matched_sources]
+
+    if len(matched_sources) <= 0:
+        trace(3, 'No sources found, proceeding anyway.')
+    else:
+        trace(3, 'Getting masks for %i sources near %s' % \
+                  (len(matched_sources), tod.info.name))
+        
+    # Cut out the target source and save to special cuts tag
+    progress['phase'] = 'planet position'
+    pos_cuts = moby2.TODCuts(nsamps=tod.nsamps, det_uid=all_det_uid,
+                             sample_offset=tod.info.sample_index)
+    mask_params = params.get_deep(('planet_cuts','mask_params'),{})
+
+    ## Do we need to look up the source offset?
+    shift_params = params.get_deep(('planet_cuts', 'mask_shift_generator'), None)
+    if shift_params is not None:
+        mask_params['offset'] = products.get_pointing_offset(
+            shift_params, tod=tod, source_offset=True)
+        if mask_params['offset'] is None:
+            raise RuntimeError("Could not determine source offset!")
+        trace(2, 'Obtained source offset %.3f %.3f degrees' % mask_params['offset'])
+
+    pos_cut_dict = {}
+    for source in matched_sources:
+        trace(2, 'Removing %s...' % source[0])
+        pos_cut_dict[source[0]] = moby2.tod.get_source_cuts(
+            tod, source[1], source[2], **mask_params)
+        pos_cuts.merge_tod_cuts(pos_cut_dict[source[0]])
+
+    az_trim = params.get_deep(('planet_cuts', 'az_trim'), None)
+    if az_trim is None:
+        pass
+    elif az_trim in ['moving', 'extrema']:
+        az_start, az_end = 0, tod.nsamps
+        if az_trim == 'extrema':
+            # Only consider region between extrema
+            throw = tod.az.max() - tod.az.min()
+            az_param = (tod.az - tod.az.min()) / throw
+            extreme = (az_param < .05) + (az_param > .95)
+            az_start, az_end = extreme.nonzero()[0][[0,-1]]
+        # Measure typical azimuth speed
+        daz = abs(np.gradient(tod.az))
+        daz_thresh = np.median(daz) / 10
+        moving = (daz >= daz_thresh*2)
+        stopped = (daz < daz_thresh/2)
+        az_end = az_start + moving[az_start:az_end].nonzero()[0][-1]
+        az_start = az_start + moving[az_start:].nonzero()[0][0]
+    else:
+        raise
+
+    # Also make a turnaround cut of some kind?
+    az_prox = params.get_deep(('planet_cuts', 'turnaround_proximity_cut'))
+    if az_prox is not None:     # assume it's degrees
+        trace(2, 'Identifying turn-around dummies...')
+        turnaround_det_mask = moby2.cuts.get_turnaround_dets(
+            pos_cuts, tod.az, az_prox * np.pi/180)
+    else:
+        turnaround_det_mask = np.ones(len(pos_cuts.cuts), bool)
+
+    # Cut no-scan moments (such as recovered motion faults and start-up idleness):
+    if params.get_deep(('planet_cuts', 'cut_stationary'), True):
+        motion_cuts = moby2.tod.get_scanning_cuts(tod.az, tod.ctime, buffer_time=0.3)
+    else:
+        motion_cuts = None
+
+    cuts_out = pos_cuts
+    if az_trim:
+        cuts_out = pos_cuts.extract(az_start, az_end-az_start)
+    trace(3, 'writing cuts result.')
+    depot.write_object(cuts_out, tag=params.get_deep(('output', 'position_tag')),
+                       tod=tod)
+
+    if params.get_deep(('output', 'plot_source_trajectory')):
+        DEG = np.pi/180
+        for source in matched_sources:
+            trace(2, 'Plotting %s...' % source[0])
+            wand = moby2.pointing.ArrayWand.for_tod_source_coords(
+                tod, ref_coord=source[1:3], scan_coords=True)
+            decim = 10
+            # Signs: flip y once because it normally increases to the
+            # "left", and then flip both coordinates because we're
+            # fixing the array and letting the planet move relative to
+            # it.
+            x, y = wand.y[::decim]/DEG, -wand.z[::decim]/DEG
+            if motion_cuts is None:
+                pl.plot(x, y, c='k', alpha=.2)
+            else:
+                for R in motion_cuts.get_complement():
+                    R = list(range(R[0]//decim, R[1]//decim))
+                    pl.plot(x[R], y[R], c='k', alpha=.4)
+                for R in motion_cuts:
+                    R = list(range(R[0]//decim, R[1]//decim))
+                    pl.plot(x[R], y[R], c='r', alpha=.1)
+            pl.scatter(x[:1], y[:1], marker='+')
+            for pop, marker in [(tod.fplane.mask * turnaround_det_mask, 'o'),
+                                (tod.fplane.mask *~turnaround_det_mask, 'x')]:
+                if pop.sum() == 0: continue
+                dx = (tod.fplane.x[pop] - wand.fcenter.x[0]) / DEG
+                dy = (tod.fplane.y[pop] - wand.fcenter.y[0]) / DEG
+                pl.scatter(dx, dy, alpha=.2, marker=marker)
+            pl.title('%s - %s' % (tod.info.basename, source[0])) 
+            pl.xlabel('DX (deg)')
+            pl.ylabel('DY (deg)')
+            pl.gca().set_aspect('equal', 'datalim')
+            pl.figtext(.2, .8, 'alt=%.1f az=%5.1f' % (np.median(tod.alt[::decim])/DEG,
+                                                      np.median(tod.az[::decim])/DEG))
+            outputm.savefig('100_trajectory_%s.png' % source[0])
+
+    if params.get_deep(('planet_cuts', 'pos_cuts_only')):
+        trace(2, 'Only position cuts requested.')
+        continue
+
+    #
+    # Cuts that actually require the detector data
+    #
+
+    progress['phase'] = 'read'
+    trace(2, 'Reading %s' % tod_file)
+    load_args = params.get_deep(('source_tods', 'load_args'),{}).copy()
+    load_args.update({'filename': tod_file})
+    tod = moby2.scripting.get_tod(load_args)
+    moby2.tod.repair_pointing(tod)
+    tod.fplane = focal_plane.subset(det_uid=tod.det_uid)
+
+    # Fill MCE flagged samples.  These are usually isolated single
+    # samples... but can be longer intervals.
+    n_bad_samples = (~tod.data_mask).sum()
+    progress['bad_samples'] = n_bad_samples
+    bad_sample_cvect = moby2.tod.CutsVector.from_mask(~tod.data_mask)
+
+    if n_bad_samples >= tod.data.shape[-1] // 5:
+        raise RuntimeError("Too many bad TES samples.  Fix your data.")
+
+    bad_sample_cuts = moby2.TODCuts.for_tod(tod)
+    for i in range(len(bad_sample_cuts.cuts)):
+        bad_sample_cuts.add_cuts(i, bad_sample_cvect)
+
+    moby2.tod.fill_cuts(tod, bad_sample_cuts, no_noise=True)
+
+    all_dets_plot(tod.ctime, tod.data - tod.data.mean(axis=1)[:,None],
+                   idx=tod.fplane.mask.nonzero()[0],
+                  cal_vect=1./filter_gain,
+                  control_lims=2, title=tod.info.name,
+                  notes=['After masking %i bad detector readout' % n_bad_samples])
+    pl.ylabel('DAC')
+    outputm.savefig('200_readout_filled.png')
+
+    progress['phase'] = 'pre-process'
+    trace(2, 'Pre-processing %s' % tod.info.name)
+    trace(4, 'Remove mean...')
+    moby2.tod.remove_mean(tod=tod)
+    trace(4, 'Detrend...')
+    tod_trends = moby2.tod.detrend_tod(tod)
+
+    trace(3, 'Plotting tod_conditioned.')
+    all_dets_plot(tod.ctime, tod.data, title=tod.info.name,
+                  cal_vect=1./filter_gain,
+                  notes = ['Before common mode / HWP removal'])
+    pl.ylabel('DAC')
+    outputm.savefig('201_tod_conditioned.png')
+
+    if 'hwp' in params:
+        trace(1, 'Computing HWP A(chi).')
+        trace(2, 'Loading HWP angles.')
+        hwp_params = params.get_deep(('hwp', 'hwp_angle'))
+        if hwp_params is None:
+            raise  RuntimeError("Provide HWP angle instructions to get a(chi).")
+        hwp_chi = products.get_hwp_angles(hwp_params, tod=tod)
+        hwp_chi *= np.pi/180 # convert to radians.
+        chi_mask = (hwp_chi >= 0)  # this is important...
+        assert(1. * chi_mask.sum() / len(chi_mask) > .9)  # min spin fraction.
+        first_ok = chi_mask.nonzero()[0][0]
+        if first_ok != 0:  #start-up.
+            hwp_chi[:first_ok] = hwp_chi[first_ok]
+        for i in (~chi_mask).nonzero()[0]:
+            if i > 0:
+                hwp_chi[i] = hwp_chi[i-1]
+        
+        filt_size = len(hwp_chi) // 1000 * 1000
+        freq = 398.7
+        filt = moby2.tod.filters2.highPassSine(fc=.1, df=.02)
+        ex = filt.getExecFor(f=freq, n=filt_size)
+        n_modes = params.get_deep(('hwp', 'n_modes'), 32)
+
+        # Copy the data (trimmed), remove mean, high-pass filter, set
+        # masked samples to zero, and store unmasked fraction.
+        trace(2, 'Conditioning detector data.')
+        zdata = tod.data[:,:filt_size].copy()
+        unmasked_fraction = np.zeros(len(tod.data))
+        filt = ex.getFourierForm()
+        moby2.tod.filter.apply_simple(zdata, filt) # in-place.
+        for i in range(len(zdata)):
+            # The chi_mask is not included here -- we'll discard those
+            # samples at fit time.
+            m = (~pos_cuts.cuts[i].get_mask()[:filt_size] *
+                 tod.data_mask[:filt_size])
+            zdata[i] *= m
+            unmasked_fraction[i] = (1. * (m*chi_mask[:filt_size]).sum() /
+                                    chi_mask[:filt_size].sum())
+
+        # Show TOD ready for HWP mode analysis.
+        trace(3, 'Plot 300.')
+        all_dets_plot(tod.ctime[:filt_size], zdata, idx=tod.fplane.mask.nonzero()[0],
+                      title=tod.info.name, cal_vect=1./filter_gain,
+                      notes = ['filtered for A(chi) fitting'])
+        pl.ylabel('DAC')
+        outputm.savefig('300_hwp_filtered_for_fit.png')
+
+        # Approximately good enough solution.
+        trace(2, 'Projecting out HWP modes.')
+        from moby2.analysis import hwp
+        m = chi_mask[:filt_size] # Important to not include invalid chi in the fit.
+        hwpp = hwp.HWPProjector(hwp_chi[:filt_size][m], n_modes)
+        coeffs = hwpp.get_coeffs_fast(zdata[:,m], unmasked_fraction)
+        hwp_modes = hwp.HWPModes.from_coeffs(tod.det_uid, coeffs)
+            
+        trace(2, 'Saving modes coefficients.')
+        msf = depot.get_full_path('', structure='HWPModeSet/{tag}/{tod_name}.h5',
+                                  tag=params.get_deep(('output', 'achi_tag')),
+                                  tod=tod, make_dirs=True)
+        with hwp.HWPModesArchive(msf, 'w') as tms:
+            tms.set_item(tod.info.name, hwp_modes, clobber=True)
+
+        trace(2, 'Removing modes from TOD.')
+        r = hwp_modes.get_reconstructor(hwp_chi)
+        for i in range(tod.data.shape[0]):
+            tod.data[i] -= r.get_achi(i)
+
+        # Redo detrending.
+        tod_trends += moby2.tod.detrend_tod(tod)
+        tod.data -= tod.data.mean(axis=1)[:,None]
+
+        # Show HWP-subtracted result.
+        trace(3, 'Plot 310.')
+        all_dets_plot(tod.ctime, tod.data, idx=tod.fplane.mask.nonzero()[0],
+                      title=tod.info.name, cal_vect=1./filter_gain,
+                      notes=['After HWP A(chi) removal, re-detrend'])
+        pl.ylabel('DAC')
+        outputm.savefig('310_hwp_after_removal.png')
+
+        trace(2, 'Quick HWP map.')
+        chi = np.arange(360)
+        x, y, s = tod.fplane.x, tod.fplane.y, tod.fplane.mask
+        r = ((x-x[s].mean())**2 + (y-y[s].mean())**2)**.5
+        phi = np.arctan2(y, x)
+        idx = np.argsort(r)
+        achi = np.zeros((len(phi), len(chi)))
+        for j, i in enumerate(idx):
+            recon = hwp_modes.get_reconstructor(chi * np.pi/180 + phi[i])
+            achi[j,:] = recon.get_achi(i)
+        pl.imshow(achi, cmap='gray',vmax=achi.std() * 4, vmin=achi.std()*-4)
+        pl.gca().xaxis.set_major_locator(pl.MultipleLocator(90))
+        pl.title('%s - HWP A(chi-phi) vs. distance' % (tod.info.name))
+        outputm.savefig('320_hwp_achi_map.png')
+
+        # Or...
+        recon = hwp_modes.get_reconstructor((chi - 180) * np.pi / 180)
+        achi = recon.get_achi(idx)
+        all_dets_plot(chi-180, achi, alpha=.1, cal_vect=1./filter_gain,
+                      title=tod.info.name, xlabel='Chi (deg)')
+        pl.ylabel('DAC')
+        outputm.savefig('330_hwp_overplot.png')
+        
+    progress['dets_loaded'] = dets_remaining(tod, 'after loading')
+
+    # Filling the cuts removes the planet signal
+    trace(2, 'Filling cuts around sources')
+    tod.cuts = pos_cuts.copy(det_uid=tod.det_uid)
+    moby2.tod.fill_cuts(tod)
+
+    # Now reset the cuts, and analyze normally
+    tod.cuts = moby2.TODCuts.for_tod(tod)
+
+    #Now add standard cuts to get rid of all the bad detectors
+    progress['phase'] = 'standard cuts'
+    trace( 2, 'Executing standard cuts' ) 
+
+    # Turn-around dummies.
+    for i in (~turnaround_det_mask).nonzero()[0]:
+        tod.cuts.set_always_cut(i)
+    progress['dets_turnaround'] = dets_remaining(tod, 'After turn-around cuts')
+
+    tod.cuts.merge_tod_cuts(moby2.tod.get_constant_det_cuts(tod))
+    progress['dets_constant'] = dets_remaining(tod, 'After constant detector cuts')
+
+    # Merge in the bad sample cut to every detector.
+    tod.cuts.merge_tod_cuts(bad_sample_cuts)
+
+    # Also merge in no-scan cuts.
+    if motion_cuts is not None:
+        for i in range(len(tod.cuts.cuts)):
+            tod.cuts.add_cuts(i, motion_cuts)
+
+    # Similarly, cut no-hwp data.
+    if 'hwp_response' in params:
+        tod.cuts.add_cuts(list(range(tod.data.shape[0])),
+                          moby2.tod.CutsVector.from_mask(~chi_mask))
+
+    amp_cuts = params.get_deep(('planet_cuts', 'amplitude_range'))
+    amps = tod.data.max(axis=1) - tod.data.min(axis=1)
+    amps /= filter_gain
+
+    log_amp = lambda a: np.log10(a + amps[amps!=0].min()/20.)
+    pl.hist(log_amp(amps), bins=20)
+
+    if amp_cuts != None:
+        amp_ok = (amp_cuts[0]<=amps)+(amps < amp_cuts[1])
+        tod.cuts.set_always_cut(~amp_ok)
+        pl.axvline(log_amp(amp_cuts[0]))
+        pl.axvline(log_amp(amp_cuts[1]))
+
+    pl.title('%s - peak-to-peak by detector' % tod.info.name)
+    pl.xlabel('log10(amp / DAC)')
+    pl.ylabel('Detector count')
+    outputm.savefig('400_amps_dac.png')
+
+    if array_plot(tod, log_amp(amps), cmap='Reds'):
+        outputm.savefig('410_amps_dac_positions.png')
+
+    # IV-based cuts
+    if iv_params is not None:
+        # R normal cuts?
+        R_cuts = iv_params.get('R_normal_fractions')
+        if R_cuts is not None:
+            #iv_cal = moby2.detectors.IVCalibration.for_tod(tod)
+            #Rn_limits = params.get_deep(('planet_cuts','R_normal_fractions'),
+            #(0., 0.8))
+            Rn = iv_analysis.get_property('fraction_Rnormal', det_uid=tod.det_uid)[1]
+            Rn_pass = (R_cuts[0] <= Rn) * (Rn < R_cuts[1])
+            tod.cuts.set_always_cut((~Rn_pass).nonzero()[0])
+            progress['dets_resist'] = dets_remaining(tod, 'After R_normal cut')
+        # Use IV cut recommendations?
+        cut_rec = iv_params.get('use_iv_cut_rec')
+        if cut_rec:
+            cut_rec = iv_analysis.get_property('cut_recommendation', det_uid=tod.det_uid)[1]
+            tod.cuts.set_always_cut(cut_rec.nonzero()[0])
+            progress['dets_iv_cut_rec'] = \
+                dets_remaining(tod, 'After IV cut recommendations')
+
+
+    # Cut channels where we don't know the pointing
+    tod.cuts.set_always_cut((~tod.fplane.mask).nonzero()[0])
+    progress['dets_pointing'] = dets_remaining(tod, 'After pointing cuts')
+
+    # Cut slow detectors
+    time_const_range = params.get_deep(('planet_cuts','time_constant_range'),
+                                       None)
+    if time_const_range is not None:
+        tau_ok, tau = time_const.get_property('tau', det_uid=tod.det_uid)
+        time_const_pass = (time_const_range[0] <= tau) * \
+            (tau <= time_const_range[1]) * tau_ok
+        tod.cuts.set_always_cut((~time_const_pass).nonzero()[0])
+    progress['dets_slow'] = dets_remaining(tod, 'After slowness cuts')
+
+    # Calbols need to be cut -- do this before source cut because it buffers them
+    #progress['phase'] = 'cut calbols'
+    #cbc = moby.cuts.cutCalbols(tod, source='1K')
+
+    # Remove troublesome nearby planets?
+    progress['phase'] = 'nearby source kills'
+    kill_sources = params.get_deep(('planet_cuts', 'sources_no_restore'), None)
+    if kill_sources is not None and len(kill_sources) > 0:
+        trace( 2, 'Killing nearby sources' )
+        for source in kill_sources:
+            if not source in pos_cut_dict:
+                trace( 2, 'Source %s was not found in %s' % (source, tod.info.name))
+                continue
+            tod.cuts.merge_tod_cuts(pos_cut_dict[source])
+    progress['sources_killed'] = kill_sources
+        
+    # Start tracking sample cuts here.
+    def cut_fracs(cuts):
+        return np.array([(c[:,1] - c[:,0]).sum() for c in cuts.cuts], float) / cuts.nsamps
+
+    # Cut bad pointings
+    tod.cuts.add_cuts(np.arange(len(tod.det_uid)), ~tod.pointing_mask, mask=True)
+
+    # Calbols and troublesome-nearby-planet cuts need to be filled before mode analysis.
+    moby2.tod.fill_cuts(tod)
+
+    # Save number of dets going into mode analysis
+    progress['dets_mode'] = dets_remaining(tod, 'Before glitch analysis')
+    progress['uncut_frac_mode'] = (1. - cut_fracs(tod.cuts)).sum()
+
+    # Plot the dark TES, dark Squid, anything else you have... in DAC
+    # units, with trends intact.
+    other_pops = [('tes', 'Standard TES'),
+                  ('dark_tes', 'Dark Detectors'),
+                  ('dark_squid', 'Dark Squids')]
+    adata =tod.info.array_data
+    for opi, (det_type, description) in enumerate(other_pops):
+        special_i = (adata['det_type'][tod.det_uid] == det_type).nonzero()[0]
+        if len(special_i) == 0: continue
+        dcopy = tod.data[special_i,:]
+        moby2.tod.retrend_tod(tod_trends[:,special_i], data=dcopy)
+        all_dets_plot(tod.ctime, dcopy,# alpha=1,
+                      cal_vect=1./filter_gain,
+                      title=tod.info.name, notes=[description + ' (retrended)'])
+        pl.ylabel('DAC')
+        outputm.savefig('%03i_%s.png' % (450+opi, det_type))
+
+    # Glitches.
+    progress['phase'] = 'glitch cuts'
+    glitch_cuts = moby2.tod.get_glitch_cuts(tod=tod)
+    tod.cuts.merge_tod_cuts(glitch_cuts)
+    progress['dets_glitch'] = dets_remaining(tod, 'After glitch cuts',)
+    progress['uncut_frac_glitch'] = (1. - cut_fracs(tod.cuts)).sum()
+
+    # Write out the glitch cuts?  If you plan to do something with the
+    # dark channels, later, you will want these.
+    gtag = params.get_deep(('output', 'glitch_tag'))
+    if gtag is not None:
+        # Merge in some earlier cuts that are of similar value here.
+        glitch_cuts.merge_tod_cuts(bad_sample_cuts)
+        glitch_cuts.set_always_cut(~amp_ok)
+        if params.get_deep(('tod_cuts', 'cut_unexamined'), True):
+            # Promote to all dets.
+            glitch_cuts = glitch_cuts.copy(det_uid=all_det_uid, cut_missing=True)
+        depot.write_object(glitch_cuts, tag=gtag,
+                           tod=tod, make_dirs=True)
+
+    # Write out the pre-common-mode cuts.
+    if params.get_deep(('tod_cuts', 'cut_unexamined'), True):
+        # Promote to apply to all detectors.  Note that the code that
+        # was here before was definitely wrong; it scrambled the
+        # detector order.
+        cuts_out = tod.cuts.copy(det_uid=all_det_uid, cut_missing=True)
+    else:
+        cuts_out = tod.cuts.copy()
+    if az_trim:
+        cuts_out = cuts_out.extract(az_start, az_end-az_start)
+    depot.write_object(cuts_out, tag=params.get_deep(('output', 'cuts_tag')),
+                       tod=tod, make_dirs=True)
+
+    # We don't use this until common mode processing... but load the
+    # calibration instructions, and write them to a new tag, if that's
+    # what the user wants.
+    cal = products.get_calibration(params['calibration'], tod.info)
+    ictag = params.get_deep(('output', 'input_cal_tag'))
+    if ictag is not None:
+        depot.write_object(cal, tag=ictag,
+                           tod=tod, make_dirs=True)
+
+
+    #
+    # Common mode(s) and associated cuts + cal.
+    #
+    
+    cmpar = params.get('common_mode', {})
+    if cmpar.get('get_cm', False):
+        trace(2, 'Getting common mode cuts and calibration')
+        # Deglitch
+        trace(3, 'Preparing TOD')
+        moby2.tod.fill_cuts(tod)
+        tod_trends += moby2.tod.detrend_tod(tod)
+        tod.data -= tod.data.mean(axis=1)[:,None]
+
+        # Apply incoming calibration.
+        cal_mask, cal_vect = cal.get_property('cal', det_uid=tod.det_uid)
+        cal_mask *= (cal_vect != 0)
+        tod.cuts.set_always_cut((~cal_mask).nonzero()[0])
+        uncut_dets = tod.cuts.get_uncut()
+        tod_cal = cal_vect.copy()   # start tracking the calibration of tod.data.
+        moby2.tod.apply_calibration(tod.data, uncut_dets,
+                                    cal_vect[uncut_dets])
+        progress['dets_cmcal'] = dets_remaining(tod, 'After CM cal cuts')
+        progress['uncut_frac_cmcal'] = (1. - cut_fracs(tod.cuts)).sum()
+
+        # Parse the 'flatfield' and 'fiducial_dets' arguments to produce:
+        # - f_ok - a mask of which detectors are to be taken as fiducial
+        # - f_recal - the flatfield numbers to apply -- must be valid for
+        #   for all detectors, not just the f_ok ones.  Default to 1.
+
+        flat_par = cmpar.get('flatfield')
+        if flat_par is not None:
+            # Get the flatfield and fiducial detectors.
+            flatfield = products.get_flatfield(flat_par, tod_info=tod.info)
+        
+            # Extract flatfield and fiducial detectors for this TOD.
+            f_ok, f_recal = flatfield.get_property('cal', tod.det_uid, default=1.)
+            if hasattr(flatfield, 'stable') and flatfield.stable is not None:
+                _, fstab = flatfield.get_property('stable', tod.det_uid, default=False)
+                f_ok *= fstab
+        else:
+            f_ok, f_recal = np.ones(len(tod.det_uid), bool), np.ones(len(tod.det_uid))
+        
+        fid_par = cmpar.get('fiducial_dets')
+        if fid_par is not None:
+            fid = products.get_detector_list(fid_par, tod_info=tod.info)
+            f_ok[:] = False
+            fid_dets = []
+            for i in uncut_dets:
+                if tod.det_uid[i] in list(fid.det_uid):
+                    fid_dets.append(i)
+            f_ok[fid_dets] = True
+            del fid_dets, fid
+
+        # Make detector sets that will have a common calibration.
+        detector_sets = [('all_dets', np.arange(len(f_ok)), f_ok*tod.cuts.get_mask())]
+
+        if cmpar.get('frequency_split'):
+            detector_sets = [] # reset.
+            adata = tod.info.array_data.to_struct_db(det_uid=tod.det_uid)
+            nom_freqs = sorted(list(set(adata['nom_freq'][f_ok])))
+            for nom_freq in nom_freqs:
+                s_freq = (adata['nom_freq'] == nom_freq)
+                s_fid = (f_ok * tod.cuts.get_mask())[s_freq]
+                trace(3, '%i fiducial dets at frequency f%03i' %
+                      (s_fid.sum(), nom_freq))
+                detector_sets.append((
+                    'f%03i' % nom_freq, s_freq.nonzero()[0], s_fid))
+
+        # Apply flat field; measure amplitude for screening later.
+        tod_cal *= f_recal
+        moby2.tod.apply_calibration(tod.data, np.arange(len(f_recal)), f_recal)
+        amps_for_cm = tod.data.max(axis=1) - tod.data.min(axis=1)
+
+        # Prepare storage for modes and per-detector weights.
+        ndet, nmode = len(tod.det_uid), len(detector_sets)
+        cmodes = moby2.tod.TODModeSet(det_uid=tod.det_uid,
+                                      shape=(nmode, len(tod.data[0])))
+        atm_recal = np.ones(len(tod_cal))
+
+        trace(3, 'Computing %i common modes and getting projections.' % nmode)
+        cm_cal = tod_cal.copy() # save a copy of this so we can adjust
+                                # projections later.
+        data_copy = tod.data.copy()
+
+        for i, (set_name, set_dets, fid_mask) in enumerate(detector_sets):
+            # 1. Sub-select within fiducial detectors.
+            fid_mask2 = fid_mask.copy()
+            fid_amps = amps_for_cm[set_dets]
+            med_fid_amp = np.median(fid_amps[fid_mask2])
+            fid_mask2 *= (med_fid_amp/2<fid_amps)*(fid_amps<med_fid_amp*2)
+            trace(3, '...amplitude cut leaves %i of %i fiducial dets for CM %s.' % (
+                fid_mask2.sum(), fid_mask.sum(), set_name))
+            # Plot the contributors to CM.
+            all_dets_plot(tod.ctime, tod.data, idx=set_dets[fid_mask2],
+                          title=tod.info.name,
+                          notes=['Calibrated fiducial dets for common mode'
+                                 ' (%s)' %set_name])
+            yl = pl.ylim() # store for next plot...
+            outputm.savefig('500_cm_fid_cal_%02i_%s.png' % (i, set_name))
+            # 2. Get the mean; project out the couplings of each det to this mode.
+            tplate = moby2.tod.data_mean_axis0(tod.data, set_dets[fid_mask2])
+            cmodes.modes[i] = tplate
+            cmodes.weights[set_dets,i] = (
+                moby2.tod.data_dot_modes(
+                    tod.data, set_dets, tplate[None,:])[0] /
+                np.dot(tplate, tplate))
+            # Renormalize.
+            set_weights = cmodes.weights[set_dets,i]
+            set_nz = set_weights != 0
+            recals = np.ones(len(set_dets))
+            recals[set_nz] = 1./set_weights[set_nz]
+
+            # We need to do some outlier rejection.  Trim the
+            # distribution until we get ~gaussian statistics.
+            r = recals[fid_mask2]
+            mean_recal = r.mean()
+            for ptrim in range(5, 31, 5):
+                lims = np.percentile(r, (ptrim, 100-ptrim))
+                s = (r>=lims[0]) *(r<=lims[1]) 
+                if s.sum() > len(s) // 10:
+                    m0, dm = r[s].mean(), r[s].std()
+                    dmm = dm / s.sum()**.5
+                    delta = mean_recal - m0
+                    trace(3, 'Outlier rejection of +/- %.1f%% moves mean by %.4f errors-in-mean' %
+                          (ptrim, delta / dmm))
+                    if abs(delta) < dmm * 3:
+                        break
+                    mean_recal = m0
+
+            # Undo that mean calibration by rescaling the common mode
+            # so that the average fiducial recal is 1.
+            cmodes.modes[i] /= mean_recal
+            cmodes.weights[set_dets,i] *= mean_recal
+            recals /= mean_recal
+
+            # Store this for plotting and stuff.
+            atm_recal[set_dets] = recals
+
+            # Apply recalibration to the TOD (and update the mode couplings).
+            tod_cal[set_dets] *= recals
+            moby2.tod.apply_calibration(tod.data, set_dets, recals)
+            cmodes.weights[set_dets,i] *= recals
+
+            # Show the resulting CM.
+            all_dets_plot(tod.ctime, tplate[None,:], title=tod.info.name,
+                          notes=['Common mode'], ylim=yl, control_lims=False)
+            outputm.savefig('501_cm_%02i_%s.png' % (i, set_name))
+            # Show the recalibrated dets.
+            all_dets_plot(tod.ctime, tod.data, idx=set_dets[fid_mask2],
+                          title=tod.info.name,
+                          notes=['CM-recalibrated detectors'
+                                 ' (%s)' %set_name])
+            pl.ylim(*yl)
+            outputm.savefig('502_cm_recal_%02i_%s.png' % (i, set_name))
+
+        # Assess CM removal quality.  1 is bad here, 0 means "all power removed".
+        quals = np.ones(len(tod.det_uid))
+        for i in uncut_dets:
+            d = tod.data[i] - cmodes.get_tod(i)
+            quals[i] = np.dot(d, d) / np.dot(tod.data[i], tod.data[i])
+        fid_cut = cmpar.get('fidelity_cut', 1e10)
+        qual_mask = (quals < fid_cut)
+
+        pl.subplot(2,1,1)
+        pl.title('CM templates')
+        for i in range(nmode):
+            pl.plot(cmodes.modes[i], label='for %i dets' % (
+                    cmodes.weights[:,i]!=0).sum())
+        hbins = [0., .1, .9, 1.0001]
+        for hi in range(len(hbins)-1):
+            pl.subplot(2,len(hbins)-1,len(hbins)+hi)
+            q0, q1 = hbins[hi], hbins[hi+1]
+            dq = (q1-q0) / 10
+            pl.hist(quals, bins=np.arange(q0, q1+dq, dq))
+            pl.gca().xaxis.set_major_locator(pl.MaxNLocator(3))
+            if q0 <= fid_cut and fid_cut < q1:
+                pl.axvline(fid_cut, ls='dotted', color='k')
+        pl.xlabel('Non-common power')
+        outputm.savefig('505_cm_template.png')
+
+        # Show those.
+        all_dets_plot(tod.ctime, tod.data, idx=qual_mask.nonzero()[0],
+                      title=tod.info.name,
+                      notes=['%i dets pass quality criteria' % qual_mask.sum()])
+        outputm.savefig('510_cm_tod_nice.png')
+
+        # And with CM subtracted...
+        for i in range(len(tod.data)):
+            tod.data[i] -= cmodes.get_tod(i)
+        all_dets_plot(tod.ctime, tod.data, idx=qual_mask.nonzero()[0],
+                      title=tod.info.name,
+                      notes=['Residual after CM subtraction.'])
+        outputm.savefig('511_cm_tod_cleaned.png')
+
+        # Cut based on rescaling?
+        scales = atm_recal
+        scale_ranges = []
+        scale_mask = np.ones(len(quals), bool)
+        if cmpar.get('scale_cut') is not None:
+            scale_mask[:] = False
+            for lo, hi in cmpar['scale_cut']['ranges']:
+                scale_mask[(lo<=scales)*(scales<hi)] = True
+                scale_ranges.append((lo,hi))
+                
+        # Show the scales relative to CM in play here
+        for i, (set_name, set_dets, fid_mask) in enumerate(detector_sets):
+            levs = scales[set_dets]
+            levs[levs>10] = 10
+            levs[levs<-10] = -10
+            pl.hist(levs[tod.cuts.get_mask()[set_dets]], bins=100, alpha=.4,
+                    label=set_name)
+        for lo, hi in scale_ranges:
+            pl.axvspan(lo, hi, alpha=.2, color='green', zorder=-10)
+        pl.legend(loc='best')
+        pl.xlabel('Recalibration factor')
+        pl.ylabel('N_dets')
+        pl.title('%s - CM scale factors' % tod.info.name)
+        outputm.savefig('520_cm_recal_factors.png')
+
+        if array_plot(tod, scales, vmin=.5, vmax=1.5):
+            outputm.savefig('521_cm_recal_positions.png')
+
+        for i, (set_name, set_dets, fid_mask) in enumerate(detector_sets):
+            mask = np.zeros(len(scales), bool)
+            mask[set_dets] = True
+            umask = scale_mask * qual_mask
+            if (array_plot(tod, abs(scales), mask*umask, vmin=.5, vmax=1.5) and
+                array_plot(tod, abs(scales), mask*~umask, marker='x',
+                           _colorbar=False)):
+                outputm.savefig('522_cm_recal_positions_%s.png' % set_name)
+
+        # The calibration we write out should be in concordance with
+        # the common mode + weights; either we recalibrated the TOD,
+        # and adjusted the weights, or we did neither.
+
+        # Write calibration
+        cal_out = moby2.Calibration(det_uid=tod.det_uid)
+        cal_out.cal = tod_cal
+        depot.write_object(cal_out, tag=params.get_deep(('output', 'cal_tag')),
+                           tod=tod, make_dirs=True)
+
+        # Write common mode (we had to wait for final calibration).
+        otag = params['output'].get('cm_tag')
+        if otag is not None:
+            path = depot.get_full_path('CommonMode', otag, tod=tod) + '.fits'
+            odir = os.path.split(path)[0]
+            if not os.path.exists(odir):
+                os.makedirs(odir)
+            cmodes.to_fits_file(path)
+
+        # Merge and write.
+        tod.cuts.set_always_cut((~qual_mask + ~scale_mask).nonzero()[0])
+        progress['dets_cm'] = dets_remaining(tod, 'After common mode fidelity')
+        progress['uncut_frac_cm'] = (1. - cut_fracs(tod.cuts)).sum()
+    
+        if params.get_deep(('tod_cuts', 'cut_unexamined'), True):
+            cuts_out = tod.cuts.copy(det_uid=all_det_uid, cut_missing=True)
+        else:
+            cuts_out = tod.cuts.copy()
+
+        if az_trim:
+            cuts_out = cuts_out.extract(az_start, az_end-az_start)
+
+        depot.write_object(cuts_out, tag=params.get_deep(('output', 'cutscm_tag')),
+                           tod=tod, make_dirs=True)
+    
+                           
+#%----- we are done now.
+    
+    progress['mappable'] = True
+    progress['exit_code'] = 0
+    progress['exit_message'] = 'success'
+    progress['phase'] = 'done'
