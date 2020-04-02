@@ -33,29 +33,36 @@ module1 = Extension('moby2/libactpol',
                     library_dirs=libdirs,
                     libraries=library)
 
+analysis_modules =  [
+    'det_sens',
+    'fp_fit',
+    'beam_ana',
+    'jumps',
+    'tod_ana',
+    'hwp',
+]
+if sys.version_info.major >= 3:
+    analysis_modules.append('socompat')
+
 setup (name = 'moby2',
        version = VERSION,
        description = 'ACTpol support',
        package_dir = {'moby2': 'python'},
        ext_modules = [module1],
        scripts = scripts,
-       packages = ['moby2',
-                   'moby2.analysis',
-                   'moby2.analysis.det_sens',
-                   'moby2.analysis.fp_fit',
-                   'moby2.analysis.beam_ana',
-                   'moby2.analysis.jumps',
-                   'moby2.analysis.tod_ana',
-                   'moby2.analysis.hwp',
-                   'moby2.aux_data',
-                   'moby2.detectors',
-                   'moby2.ephem',
-                   'moby2.instruments',
-                   'moby2.instruments.actpol',
-                   'moby2.instruments.mbac',
-                   'moby2.mapping',
-                   'moby2.pointing',
-                   'moby2.scripting',
-                   'moby2.tod',
-                   'moby2.util',
-                   ])
+       packages = (
+           ['moby2',
+            'moby2.detectors',
+            'moby2.ephem',
+            'moby2.instruments',
+            'moby2.instruments.actpol',
+            'moby2.instruments.mbac',
+            'moby2.mapping',
+            'moby2.pointing',
+            'moby2.scripting',
+            'moby2.tod',
+            'moby2.util',
+            'moby2.analysis'] +
+           ['moby2.analysis.%s' % p for p in analysis_modules]
+       )
+   )
