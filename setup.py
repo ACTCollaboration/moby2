@@ -4,20 +4,13 @@ from distutils.core import setup, Extension
 
 VERSION = '0.1'
 
-import os
 import glob
 import sys
-try:
-    import actpol_config
-except ImportError:
-    print("Failed to load actpol_config.")
-    print("The search path is:", sys.path)
-    sys.exit(10)
 
 import numpy
-includes = actpol_config.include_dirs + [numpy.get_include()]
-libdirs = actpol_config.library_dirs + []
-library = ['fftw3f', 'gslcblas', 'gsl', 'lapack'] + actpol_config.libraries
+includes = [numpy.get_include()]
+libdirs = []
+library = ['fftw3f', 'gslcblas', 'gsl', 'lapack', 'actpol']
 
 sources = glob.glob('src/*.c')
 headers = glob.glob('src/*.h')

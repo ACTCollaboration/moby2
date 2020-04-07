@@ -1,9 +1,10 @@
-ifeq ($(wildcard actpol_config.py),)
-# $(error actpol_config.py not found in this directory.)
-endif	
+# To override PYTHON or PREFIX semi-permanently, set them in Makefile.local
+ifeq (Makefile.local,$(wildcard Makefile.local))
+  include Makefile.local
+endif
 
 PYTHON ?= python
-PREFIX = $(shell python -c 'from __future__ import print_function; import actpol_config; print(actpol_config.BASE)')
+PREFIX ?= /usr/local
 
 default: .build
 
@@ -12,6 +13,9 @@ default: .build
 
 install:
 	$(PYTHON) setup.py install --prefix=$(PREFIX)
+
+install-user:
+	$(PYTHON) setup.py install --user
 
 clean:
 	-$(PYTHON) setup.py clean
