@@ -75,3 +75,34 @@ def get_tod(params, aman=None):
         data = aman.merge(data)
 
     return (data, tod)
+
+
+def actpol_load_observation(db, obs_id, dets=None, prefix=None):
+    """Load observation -- keep this compatible with sotodlib.Context
+    get_obs interface."""
+    aman = None
+    if dets is not None:
+        # Then it is a list of dets.  Restrict the list to only things
+        # in our detset(s).
+        detsets = db.get_detsets(obs_id)
+        assert(len(detsets) == 1)
+        dets_ref = db.get_dets(detsets[0])
+        dets = [d for d in dets if d in dets_ref]
+        # Pass it in through an aman.
+        aman = core.AxisManager(core.LabelAxis('dets', dets))
+
+    #To support moby2 filebases, the default prefix shall be '' --
+    #i.e. the user must either record clean basenames or full paths
+    #for this system or pass in a prefix explicitly.
+    if prefix is None:
+        prefix = ''
+
+    # Use the db to get the filename.
+    files_by_detset = db.get_files(obs_id, prefix=prefix)
+    assert(len(files_by_detset) == 1)
+    for detset, fileidx in files_by_detset.items():
+        assert(len(fileidx) == 1)
+        filename, sample_start, sample_stop = fileidx[0]
+        aman, tod = get_tod({'filename': filename}, aman=aman)
+    return aman
+

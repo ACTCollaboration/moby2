@@ -4,6 +4,9 @@
 
 from sotodlib import metadata
 from sotodlib import core
+
+from .tod import actpol_load_observation
+
 import so3g
 import moby2
 
@@ -13,6 +16,7 @@ import re
 
 __all__ = [
     'register_loaders',
+    'extract_basename',
 ]
 
 # Note some registration code runs on import; see bottom of source.
@@ -239,3 +243,5 @@ def register_loaders():
         'actpol_detofs': ActDetOfsLoader,
         'actpol_pointofs': ActPointOfsLoader,
     })
+    from sotodlib.data import load
+    load.OBSLOADER_REGISTRY['actpol_moby2'] = actpol_load_observation
