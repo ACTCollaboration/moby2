@@ -25,6 +25,13 @@ The steps are:
 Environment variables
 ---------------------
 
+MOBY2_PREFIX HAS BEEN REMOVED.  THESE DOCS NEED UPDATE:
+
+- use an anonymous PREFIX for installing libactpol_deps and libcatpol
+- provide standard environment modifications for making those deps
+  visible to moby2 build system (env script and modulefile)
+
+
 We will isolate the software from the main system.  Choose a prefix
 where the libraries, include files, python packages will live.  I like
 $HOME/build.  Set the MOBY2_PREFIX:
