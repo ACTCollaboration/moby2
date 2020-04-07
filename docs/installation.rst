@@ -59,8 +59,7 @@ libactpol dependencies
 
 As of mid-2018, all dependencies are either easily obtained through
 system package managers or pip, or are stored in an ACTCollaboration
-github repository.  Instructions for the older approach using
-build.bash and some source bundles can be found here: :doc:`here <old_libactpol>`.
+github repository.
 
 libactpol dependencies: easily obtained packages
 ------------------------------------------------
@@ -74,12 +73,11 @@ packages in your distribution's package manager:
 * wcslib -- ``sudo apt-get install wcslib-dev``
 
 (For Redhat you want something like: ``sudo yum install zziplib-devel
- cfitsio-devel wcslib``.)
+cfitsio-devel wcslib``.)
 
 If you do not have root access on your machine, see if the system
 administrator has or can make them available.  Alternately, install
-them just for your user account.  You may need to track down recent
-source packages and/or see :doc:`older instructions <old_libactpol>`.
+them just for your user account.
 
 libactpol dependencies: special modules
 ---------------------------------------

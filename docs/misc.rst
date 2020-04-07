@@ -9,3 +9,6 @@ Miscellaneous
   database
   weather
   hk_lowres
+  focal_plane
+  tod_info
+  array_wand
