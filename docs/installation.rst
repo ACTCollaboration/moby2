@@ -54,70 +54,83 @@ versions):
   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$MOBY2_PREFIX/lib64:$MOBY2_PREFIX/lib
 
 
-Build libactpol dependencies
-----------------------------
+libactpol dependencies
+----------------------
 
-The patched version of libactpol that we use depends on the following
-dev packages, which may be installed / installable without much effort:
+As of mid-2018, all dependencies are either easily obtained through
+system package managers or pip, or are stored in an ACTCollaboration
+github repository.  Instructions for the older approach using
+build.bash and some source bundles can be found here: :doc:`here <old_libactpol>`.
 
-* libcfitsio3-dev -- sudo apt-get install libcfitsio3-dev
-* libzzip-dev -- sudo apt-get install libzzip-dev
-* wcslib -- sudo apt-get install wcslib-dev
-* libslim -- build *after* installing libzzip-dev
-* sofa -- custom Makefile
-* slarefro -- a single slalib routine; custom package (requires gfortran)
+libactpol dependencies: easily obtained packages
+------------------------------------------------
 
-You may have already installed some of these.  For ones you haven't:
+The patched version of libactpol that we use depends on some less
+common dev packages.  You should be able to find the following
+packages in your distribution's package manager:
 
-* Go here: http://www.astro.princeton.edu/~mhasse/moby2_install/libactpol_deps
-* Descend into a recent dated folder.  E.g. 140124.
-* Get the libactpol_deps.tar file, or just the zips you need and the
-  build.bash script.  Put them all in a directory somewhere where you
-  can cook.
-* Edit build.bash and comment out the things you don't want to
-  install. E.g. to compile everything except cfitsio and zziplib:
+* libcfitsio3-dev -- ``sudo apt-get install libcfitsio3-dev``
+* libzzip-dev -- ``sudo apt-get install libzzip-dev``
+* wcslib -- ``sudo apt-get install wcslib-dev``
 
-.. code-block:: shell
+(For Redhat you want something like: ``sudo yum install zziplib-devel
+ cfitsio-devel wcslib``.)
 
-  CFIT= #cfitsio3340.tar.gz
-  SLAR=sla_refro-moby2-1.tar.gz
-  SOFA=sofa-moby2-1.tar.gz
-  WCSL=wcslib-4.17.tar.bz2
-  ZZIP= #zziplib-0.13.59.tar.bz2
-  SLIM=slim_2.6.5.tgz
+If you do not have root access on your machine, see if the system
+administrator has or can make them available.  Alternately, install
+them just for your user account.  You may need to track down recent
+source packages and/or see :doc:`older instructions <old_libactpol>`.
 
-* You might also set "UNZIP" at this point, the folder where the
-  source code will be configured and build.  Make sure the folder exists.
-* Then run `bash build.bash`.  It will try to make and install
-  everything.  At the end it tells you whether it thinks it worked or
-  not.  Successful output from the above would be:
+libactpol dependencies: special modules
+---------------------------------------
 
-.. code-block:: shell
+There are three rather specialized packages required by libactpol:
+libslim (compression), sofa (astrometric conversions), slarefro
+(refraction).  These are most easily obtained through the
+libactpol_deps repository.
 
-  Summary:
-    cfit_ok = 
-    slar_ok = 1
-    sofa_ok = 1
-    wcsl_ok = 1
-    zzip_ok = 
-    slim_ok = 1
+You can access the repository by cloning::
+
+  git clone ssh://git@github.com/ACTCollaboration/libactpol_deps.git
+
+This repository contains 3 installable modules.  **See the README file
+for the latest instructions.**
+
+**libslim**: In order to support uint8, we may be using a patched
+version of libslim.  This may become unneccessary in the future.
+
+**sofa**: This is the Standards of Fundamental Astronomy library from
+the IAU, http://www.iausofa.org/ .  At this writing, we use a recent
+libsofa, unaltered except to include a Makefile.  This may change in
+the future to support leap seconds more flexibly.
+
+**sla_refro**: This is a very simple Fortran -> C wrapping of a single
+function from slalibf that is used by libactpol to compute atmospheric
+refraction.
+
+Once all three of these packages have been installed, it should be
+possible to compile libactpol.
 
 
 Build patched libactpol
 -----------------------
 
-Get `libactpol-1.2.0-moby2-4.tar.gz`_.  Unzip it.  Enter the
-directory.  Run:
+You can access the repository by cloning::
 
-.. _libactpol-1.2.0-moby2-4.tar.gz:  http://www.astro.princeton.edu/~mhasse/moby2_install/libactpol-moby2/libactpol-1.2.0-moby2-4.tar.gz
+  git clone ssh://git@github.com/ACTCollaboration/libactpol.git
+  cd libactpol.git
 
-.. code-block:: shell
+As of this writing **moby2 does not work with the** ``master`` **branch of**
+``libactpol``!  Instead you should switch to the ``moby2_mods`` branch::
 
-  ./configure --enable-shared --prefix=$MOBY2_PREFIX
+  git checkout moby2_mods
+
+Then proceed with::
+
+  autoreconf -i
+  ./configure --enable-shared --disable-oldact --disable-slalib --prefix=$MOBY2_PREFIX
   make
   make install
-
-If this fails, make sure you've defined all the variables.
 
 
 Get moby2 dependencies
@@ -167,12 +180,6 @@ repo on github.com:
 
   git clone ssh://git@github.com/ACTCollaboration/moby2.git moby2
 
-In a pinch you can get a less current version from this http mirror:
-
-.. code-block:: shell
-
-  git clone http://www.astro.princeton.edu/~mhasse/repos/moby2.git moby2
-
 
 Compile and install moby2
 -------------------------
@@ -203,36 +210,7 @@ initialize your .moby2 file from the template copy:
 
 .. code-block:: shell
 
-  cp /mnt/act2/mhasse/shared/dot_moby2_feynman $HOME/.moby2
-
-
-**Use system install with python2.6 for cluster nodes**
-
-If you want to run on the cluster nodes, you must use python2.6.  So
-ensure the "python" module is not loaded, and initialize your
-environment as follows.  Note these lines can be simply added to
-.bashrc:
-
-.. code-block:: shell
-
-  module unload python
-  source /mnt/act2/mhasse/shared/moby2_env2.6.bash
-
-
-**Use python2.7 on head node or on node030**
-
-The python2.7 version of the shared code is likely to be slightly more
-up-to-date.  It's not available on the cluster nodes, but it is
-available on feynman headnode and on node030.  To activate python2.7
-and the shared moby2, add to .bashrc:
-
-.. code-block:: shell
-
-  module load python
-  source /mnt/act2/mhasse/shared/moby2_env.bash
-
-If you are building your own copy of moby2 and patched libactpol on
-feynman, please note the following:
+  cp /mnt/act3/users/mhasse/shared/dot_moby2_feynman $HOME/.moby2
 
 
 **Building from scratch**

@@ -78,16 +78,26 @@ with the path to the local APEX data archive:
 
   APEX_weather = {
       'targets_directory': '/dataz/aux_data/hk_lowres/',
-      'ctime_range': [1370000000, 1500000000],
+      'ctime_range': [1370000000, 2000000000],
   }
 
-**On feynman/node030:**
+**On feynman:**
 
 .. code-block:: shell
 
   HK_lowres = {
       'targets_directory': '/mnt/act3/users/mhasse/depots/mhasse0/hk_lowres/',
-      'ctime_range': [1370000000, 1500000000],
+      'ctime_range': [1370000000, 2000000000],
+  }
+
+**On tigercpu/della:**
+
+.. code-block:: shell
+
+  HK_lowres = {
+      'targets_directory':
+      '/projects/ACT/mhasse/depots/actpol_shared/aux_data/hk_lowres',
+      'ctime_range': [1370000000, 2000000000],
   }
 
 

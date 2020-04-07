@@ -5,31 +5,34 @@
 =======================================
 
 The scripts ``bin/planetCuts`` and ``bin/planetMap`` can be used to
-process planet observation time streams and produce maps.
-
-**For first light:** The output of :doc:`fp_fit <fp_fit>` can be used
-to set the detector pointing offsets and time constants for planetCuts
-and planetMap.  Use 'source': 'fp_file'.  For flatfield: you're on
-your own, but you can jam in a recalibration factor easily enough.
+process planet observation time streams to produce maps.
 
 When running these scripts: the template configuration files should be
-copied into a working directory and edited for the use at hand.
+copied into a working directory and edited for the purpose at hand.
 Below, we first describe the two scripts and how they are invoked.
-After that there is a description of a few important configuration
+After that there is a description of important configuration
 parameters.
+
+.. Link test: :ref:`get-focal-plane`.
 
 planetCuts
 ==========
 
-``planetCuts`` writes two important analyses to disk.  The first is a
-TODCuts object whose purpose is to mask the planetary signal in the
-TOD.  The second is a TODCuts object that cuts samples and detectors
-that are bad somehow.  Both of these are used by ``planetMap``.
+``planetCuts`` processes one or more merged TOD and for each one
+writes some important results to disk.  These include:
 
-Use a configuration file like :download:`planetCuts.in
-</_moby2/params/planetCuts.in>`.  TODs should be passed in on the
-command line, or through a tod_list file (in which case each is
-analyzed independently).
+* Results to be consumed by planetMap (or other interested agents):
+
+  * Time-stream cuts (TODCuts).
+  * Time-stream calibration (Calibration).
+  * Common mode set, with couplings to the calibrated data
+    (CommonMode).
+
+* Summary and debugging plots and statistics to be inspected by the
+  analyzer:
+
+  * Plots of the common mode, dark modes, surviving detectors, etc.
+  * Statistics on how many detectors survived successive cuts.
 
 The program is invoked as
 
@@ -38,14 +41,61 @@ The program is invoked as
   planetCuts [-o <output_prefix> ] [-v <verbosity>] [-i] \
     planetCuts.in [tod_filename, ...]
 
-The -i option causes interactive debugging, which means that python
-exceptions cause a python debugger session to be initiated in the
-context of the fault (so local variables can be inspected).
+Some useful options:
+
+* -i: causes interactive debugging, which means that python exceptions
+  cause a python debugger session to be initiated in the context of
+  the fault (so local variables can be inspected).
+* -v: set the verbosity level.  Higher numbers are more verbose; 4
+   gives really quite a lot of detail.
+* -o: override the output prefix from the configuration file.
+
+The ``tod_filename`` can often just be the tod_name
+(e.g. 1234567890.1234568000.ar2) that you're interested in.  Note that
+planetCuts won't necessarily read the TODs from the command line --
+that's a setting you can manipulate.
+
+The next sections are about the planetCuts configuration file.
+
+Configuration file overview
+---------------------------
+
+The top-level entries in the planetCuts configuration file are:
+
+* moby2_options - common block specifying default verbosity and
+  logging behaviors.
+* output -- where to write outputs, and what tag names to give to
+  various results.
+* source_tods -- how to find TODs, restrictions on what detectors or
+  samples should be loaded.
+* pointing -- how to load the pointing information for a TOD.
+* time_constants -- how to load the time constants.
+* calibration -- what calibration operations should be performed.
+* planet_cuts -- parameters for the various cuts.
+* common_mode -- parameters for computing the common mode and for the
+  calibration / cuts associated with common_mode correlation.
+
+Input data and meta-data
+------------------------
+
+To specify the TOD list, see :ref:`get-tod-list`.
+
+
+Tuning the cut options and parameters
+-------------------------------------
+
+Control of output data locations and formats
+--------------------------------------------
 
 By default, the cut results are written to a depot in ``./depot/``,
 under generic tags "position_cuts" and "planet_cuts".  The tags and
 depot indicated in the ``output`` block of the parameters file should
 agree with those in the planetMap configuration file.
+
+The ``planetCuts`` script is typically run on a single merged TOD,
+though multiple TODs can be specified on the command line.  The cut
+specifications are given in a configuration file like :download:`planetCuts.in
+</_moby2/params/planetCuts.in>`.
 
 
 planetMap

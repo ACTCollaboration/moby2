@@ -31,10 +31,8 @@ The operations supported by ``fp_fit`` are:
 * ``average_fits`` - combine multiple fits and obtain average detector
   positions and time constants.
 
-``fp_fit`` requires a configuration file like
-:download:`python/data/params/fp_fit.in </_moby2/params/fp_fit.in>`.
-The parameters particular to ``fp_fit`` are in the ``fp_fit`` block of
-the configuration file.
+To analyze a single planet observation, ``fp_fit`` is typically run
+several times, with different configuration files, to advance the fit.
 
 
 Fitting a single planet observation
