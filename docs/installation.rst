@@ -21,24 +21,18 @@ The steps are:
 * Install libactpol
 * Install moby2 dependencies
 * Install moby2
+* Point to a working .moby2
 
 Environment variables
 ---------------------
 
-MOBY2_PREFIX HAS BEEN REMOVED.  THESE DOCS NEED UPDATE:
-
-- use an anonymous PREFIX for installing libactpol_deps and libcatpol
-- provide standard environment modifications for making those deps
-  visible to moby2 build system (env script and modulefile)
-
-
-We will isolate the software from the main system.  Choose a prefix
-where the libraries, include files, python packages will live.  I like
-$HOME/build.  Set the MOBY2_PREFIX:
+Often it is necessary or desirable to install ``moby2`` and/or its
+dependencies into a special area.  You may define the MOBY2_PREFIX to
+help with that.  For example, to install stuff into /usr/local, set:
 
 .. code-block:: shell
 
-  export MOBY2_PREFIX=$HOME/build
+  export MOBY2_PREFIX=/usr/local
 
 For building, execute that line and the following lines in the shell
 where you will be compiling stuff:
@@ -49,16 +43,42 @@ where you will be compiling stuff:
   export CFLAGS="-I$MOBY2_PREFIX/include $CFLAGS"
   export CPPFLAGS="-I$MOBY2_PREFIX/include $CPPFLAGS"
 
-For running, expose the packages to python by defining MOBY2_PREFIX
-and adding the following lines to .bashrc (note these might need a bit
-of modification if you're on a 32-bit system or running older python
-versions):
+Later, Python must be able to find the package, the executable
+scripts, and the shared libraries.  If you have chosen a non-standard
+installation location, the environment must be modified so Python and
+friends can find stuff.  **In that case**, modify the lines below for
+your Python version, and make sure they, too are loaded into the shell
+(perhaps through your .bashrc, along with the lines MOBY2_PREFIX
+definition you have chosen):
 
 .. code-block:: shell
 
   export PATH=$MOBY2_PREFIX/bin:${PATH}
-  export PYTHONPATH=$PYTHONPATH:$MOBY2_PREFIX/lib64/python2.7/site-packages:$MOBY2_PREFIX/lib/python2.7/site-packages
-  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$MOBY2_PREFIX/lib64:$MOBY2_PREFIX/lib
+  export PYTHONPATH=$PYTHONPATH:$MOBY2_PREFIX/lib/python3.6/site-packages/
+  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$MOBY2_PREFIX/lib
+
+You might prefer to set these things up in a modulefile.  That would
+look like this::
+
+  #%Module 1.0
+  #
+  # moby and dependencies
+  #
+
+  ## Modify these definitions and leave the other stuff...
+  set mroot /path/to/moby2_deps
+  set pystr python3.6
+  set dot_moby2 /path/to/dot_moby2
+
+  setenv                  MOBY2_PREFIX    $mroot
+  setenv                  DOT_MOBY2       $dot_moby2
+  prepend-path            PATH            $mroot/bin
+  prepend-path            LIBRARY_PATH    $mroot/lib
+  prepend-path            LD_LIBRARY_PATH $mroot/lib
+  prepend-path            MANPATH         $mroot/share/man
+  prepend-path            CPATH           $mroot/include
+  prepend-path            FPATH           $mroot/include
+  prepend-path            PYTHONPATH      $mroot/lib/$pystr/site-packages
 
 
 libactpol dependencies
@@ -141,15 +161,29 @@ Then proceed with::
 Get moby2 dependencies
 ----------------------
 
-The -dev packages are needed for building; the python stuff is only
-needed at run time.  The moby2 dependencies can all be found by the
-Ubuntu package manager, or easy_install.
+The -dev packages are needed for compiling and linking the C
+extensions. The Python stuff is only needed at run time.  The moby2
+dependencies can all be found by the Ubuntu package manager, or pip,
+or easy_install.
 
-.. code-block:: shell
+The -dev packages::
 
   sudo apt-get -y install libfftw3-dev \
                           liblapack-dev \
-                          libgsl0-dev \
+                          libgsl0-dev
+
+Depending on your system and the Python version, you will need these
+(Python 3)::
+
+                          python3-dev \
+                          python3-tz \
+                          python3-numpy \
+                          python3-matplotlib \
+                          python3-scipy \
+			  python3-mysqldb \
+                          python3-setuptools
+
+or these (Python 2)::
                           python-dev \
                           python-tz \
                           python-numpy \
@@ -157,6 +191,9 @@ Ubuntu package manager, or easy_install.
                           python-scipy \
 			  python-mysqldb \
                           python-setuptools
+
+And someone also ``pyephem``; perhaps::
+
   sudo easy_install pyephem pyfits
 
 If you have to compile your own libfftw3, make sure to enable shared
@@ -178,7 +215,7 @@ If you have to compile your own pyephem, do it like this:
 Get moby2
 ---------
 
-Use git to clone the moby2 repository.  Our main copy is a private
+Use git to clone the moby2 repository.  Our main copy is a public
 repo on github.com:
 
 .. code-block:: shell
@@ -189,61 +226,33 @@ repo on github.com:
 Compile and install moby2
 -------------------------
 
-In the moby2 source directory:
+In the moby2 source directory, you can use ``setup.py`` in the usual
+way to build and install moby2.  I.e.::
 
-#. Make sure ``MOBY2_PREFIX`` is set properly.
-#. Run ``make``.  Pause for laughter.
-#. Run ``make install``.
-#. Test it: ``python -c 'import moby2'``.
-#. Add the necessary paths to your ``.bashrc``, or whatever, so that
-   the system can find ``moby2`` next time you log in.  There's a
-   template in ``python/data/configs/moby2_env``; you can copy it
-   somewhere, update the ``MOBY2_PREFIX`` variable, and source the
-   resulting file from your ``.bashrc``.
-#. Create a ``~/.moby2`` file for your user.  Copy the template from, e.g.
-   ``python/data/configs/dot_moby2_actpol``.
+  python setup.py build
 
+and then **one** of::
 
-Installation on feynman
------------------------
+  python setup.py install --user
+  python setup.py install
+  python setup.py install --prefix=/path/to/moby2_stuff/
 
-**Initialize .moby2**
+There is a ``Makefile`` as well, with targets:
 
-The template copy of .moby2 points to the locations of TOD data, APEX
-weather, IOP parameters, etc.  Before trying to run moby2 on feynman,
-initialize your .moby2 file from the template copy:
+* ``build`` (default): builds.
+* ``install``: installs with --prefix=${PREFIX}
+* ``install-user``: installs with --user
 
-.. code-block:: shell
+If you want to semi-permanently override either PREFIX or PYTHON (to
+select a particular version or installation), you can set those in a
+file ``Makefile.local``, and they will be included at the start of the
+Makefile.  For example, you might populate Makefile.local with::
 
-  cp /mnt/act3/users/mhasse/shared/dot_moby2_feynman $HOME/.moby2
+  PYTHON = python3
+  PREFIX = /home/shared/software/moby2/
 
+Test the installation with: ``python -c 'import moby2'`` or similar.
 
-**Building from scratch**
-
-Some system environment variables need to be unset for the builds to
-work cleanly:
-
-.. code-block:: shell
-
-  unset FLAGS
-  unset U
-
-The python dependencies can be installed through one of (choose your
-python version...):
-
-.. code-block:: shell
-
-  # python2.7
-  easy_install --prefix=$MOBY2_PREFIX/lib64/python2.7/site-packages/ \
-    pyephem pyfits
-  # or
-  easy_install --prefix=$MOBY2_PREFIX/lib64/python2.6/site-packages/ \
-    pyephem pyfits
-
-
-For database access on the cluster nodes, MySQLdb is needed.
-easy_install refuses to install this on the head node, because it is
-already installed (though in a place not accessible from the cluster
-nodes).  A work-around is to launch the easy_install command (similar
-to above but with package "mysql-python") within a PBS job.
-
+You will probably need to direct the system to a valid ``.moby2``
+file.  Define the environment variable DOT_MOBY2 to point to that
+file, or just put something valid in ~/.moby2.
