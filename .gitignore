@@ -1,3 +1,4 @@
-actpol_config.pyc
 build/
 *~
+
+Makefile.local
