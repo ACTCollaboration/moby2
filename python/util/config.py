@@ -10,14 +10,16 @@ class MobyConfig(MobyDict):
     def __init__(self, filename=None):
         super(MobyDict, self).__init__()
         if filename is None:
+            # Try global environment first.
+            filename = os.getenv('DOT_MOBY2')
+        if filename is None:
             # Look for .moby2... but not that hard.
-            filename = os.getenv('HOME', '')
-            filename = os.path.join(filename, '.moby2')
+            filename = os.path.expanduser('~/.moby2')
             if not os.path.exists(filename):
                 filename = None
         if filename is not None:
-            self.filename = filename
-            self.update_from_file(filename)
+            self.filename = os.path.expanduser(filename)
+            self.update_from_file(self.filename)
 
 user_config = None
 
