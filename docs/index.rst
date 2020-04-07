@@ -13,6 +13,7 @@ programs for analyzing ACTpol observations.
 .. toctree::
    :maxdepth: 2
 
+   intro
    installation
    tod
    pointing

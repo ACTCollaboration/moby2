@@ -14,4 +14,5 @@ Module list:
   fp_fit
   planet_mapping
   quick_beam
-
+  det_sens
+  get_solid_angle

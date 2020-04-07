@@ -149,3 +149,23 @@ example, to filter out signal below ell of 1000:
   ell = fmap0.radii() * 180 / np.pi
   fmap.data *= (ell > 1000)
   map1 = fmap.ifftMap()
+
+
+Sub-pixel operations
+====================
+
+Using Fourier techniques, we can...
+
+Shift an image by a non-integral number of pixels.  Note this will
+cycle pixels from one side of the map into the other side -- so be
+careful.
+
+.. code-block:: python
+
+  # Load a map
+  map0 = moby2.mapping.fits_map.spaceMap('source.fits')
+  # Find the position of the peak or something...
+  x0, y0 = -0.05, +0.02
+  # Get the shifted map.
+  map1 = moby2.mapping.fits_map.shiftImage(map0, -x0, -y0)
+
