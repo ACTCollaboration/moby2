@@ -163,7 +163,7 @@ class StructDB(np.ndarray):
 
     @classmethod
     def from_column_file(cls, filename, field_map, dtypes={},
-                         comments='#', skip=0):
+                         comments='#', skip=0, delim=None):
         """
         Load data from columnated ascii file.  field_map a map from
         field name to column number (0-indexed), which can be a dict
@@ -184,7 +184,7 @@ class StructDB(np.ndarray):
         names, t_columns = list(zip(*field_map))
         # Load data arrays
         data = read_columns(filename, t_columns, skip=skip, dtypes=t_dtypes,
-                            comments=comments)
+                            comments=comments, delim=delim)
         # That's it
         return cls.from_data(list(zip(names, data)))
 
