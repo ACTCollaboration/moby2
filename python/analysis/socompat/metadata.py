@@ -86,8 +86,7 @@ n
 
     flags = []
     for d, c in zip(det_names, cuts_in.cuts):
-        i = so3g.proj.Ranges.from_array(c + cuts_in.sample_offset)
-        i.count = cuts_in.nsamps
+        i = so3g.proj.Ranges.from_array(c + cuts_in.sample_offset, cuts_in.nsamps)
         flags.append(i)
     flags = so3g.proj.RangesMatrix(flags)
 
