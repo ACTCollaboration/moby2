@@ -29,13 +29,17 @@ def get_tod(params, aman=None):
             params['det_uid'] = det_uid
 
     tod = moby2.scripting.get_tod(params)
+    count = len(tod.ctime)
+    if tod.data is None:
+        # Hot-wire empty signal for no-dets case.
+        tod.data = np.zeros((0, count), 'float32')
 
     pa = 'pa' + tod.info.array[-1]
     axes = {
         'dets':
         core.LabelAxis('dets', ['%s_%04i' % (pa, d) for d in tod.det_uid]),
         'samps':
-        core.OffsetAxis('samps', tod.data.shape[1], 0, tod.info.basename),
+        core.OffsetAxis('samps', count, 0, tod.info.basename),
     }
 
     data = core.AxisManager(axes['dets'], axes['samps'])
