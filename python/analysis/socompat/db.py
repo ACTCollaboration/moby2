@@ -9,9 +9,9 @@ __all__ = ['make_detdb', 'make_obsdb']
 
 def make_detdb():
     """
-    Convert recent ACTPol ArrayData to an metadata.DetDB.
+    Convert recent ACTPol ArrayData to an metadata.DetDb.
     """
-    db = metadata.DetDB()
+    db = metadata.DetDb()
     db.create_table('base', [
         "`name` varchar(8)",
         "`array_name` varchar(8)",
@@ -90,7 +90,7 @@ def make_detdb():
 
 
 def make_obsdb():
-    db = metadata.ObsDB()
+    db = metadata.ObsDb()
     cat = moby2.scripting.get_obs_catalog()
     c = db.conn.cursor()
     s = cat['tod_name'] != '1410143132.1018'

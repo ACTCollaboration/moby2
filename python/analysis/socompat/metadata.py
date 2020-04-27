@@ -2,8 +2,8 @@
 # Export ACT metadata to SO formats.
 #
 
-from sotodlib import metadata
 from sotodlib import core
+from sotodlib.io import metadata
 
 from .tod import actpol_load_observation
 
@@ -34,7 +34,7 @@ class ActTodCal(metadata.simple.PerDetectorHdf5):
 
 
 def get_abscal_proddb(filename, dataset):
-    """Populate a ProdDB from the given HDF5 file, at the given dataset or
+    """Populate a ProdDb from the given HDF5 file, at the given dataset or
     group address.
 
     """
@@ -45,11 +45,11 @@ def get_abscal_proddb(filename, dataset):
     all_obs_id = sorted([str(x, 'ascii') for x in
                          list(set(list(data['tod_id'])))])
 
-    scheme = metadata.ManifestScheme()\
+    scheme = core.metadata.ManifestScheme()\
              .add_exact_match('obs:obs_id')\
              .add_data_field('loader')\
              .add_data_field('dataset')
-    man = metadata.ManifestDB(scheme=scheme)
+    man = core.metadata.ManifestDb(scheme=scheme)
     for obs_id in all_obs_id:
         man.add_entry({'obs:obs_id': obs_id,
                        'dataset': dataset,
