@@ -192,11 +192,41 @@ def get_array_data(params, tod_info=None):
     filename = os.path.join(depot.depot_path, 'ArrayData/%s/%s/default.fits'%(season,array))
     return moby2.tod.ArrayData.from_fits_table(filename)
 
-def get_tod(params):
-    instrument = _get_instrument(params)
+def get_tod(*params, **kw_params):
+    """Get a TOD.  Parameters are backend specific... but there is only
+    one backend.  See moby2.instruments.actpol.get_tod.
+
+    Historically the call had to be made like this:
+
+       get_tod({'filename': 'tod.zip', 'det_uid': [1,2,3]})
+
+    But now you can pass any number of such dictionaries:
+
+       get_tod({'filename': filename}, {'det_uid': [1,2,3]})
+
+    Or pass a mix of dicts and keyword args (the latter will
+    override):
+
+       get_tod({'filename': filename}, det_uid=[1,2,3])
+
+    And in fact the first argument can be a string, which will be
+    jammed in as 'filename':
+
+       get_tod(filename, det_uid=[1,2,3])
+
+    Returns the TOD object if all goes well.
+    """
+    all_params = {}
+    for ip, p in enumerate(params):
+        if ip == 0 and isinstance(p, str):
+            p = {'filename': p}
+        all_params.update(p)
+    all_params.update(kw_params)
+
+    instrument = _get_instrument(all_params)
     if instrument in ["actpol","mbac"]:
         from moby2.instruments.actpol import get_tod as get_act_tod
-        return get_act_tod(**params)
+        return get_act_tod(**all_params)
     else:
         raise _UnhandledInstrument(instrument)
     
