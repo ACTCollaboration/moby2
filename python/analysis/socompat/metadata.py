@@ -242,5 +242,5 @@ def register_loaders():
         'actpol_detofs': ActDetOfsLoader,
         'actpol_pointofs': ActPointOfsLoader,
     })
-    from sotodlib.data import load
+    from sotodlib.io import load
     load.OBSLOADER_REGISTRY['actpol_moby2'] = actpol_load_observation

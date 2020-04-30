@@ -52,6 +52,7 @@ setup (name = 'moby2',
        scripts = scripts,
        packages = (
            ['moby2',
+            'moby2.aux_data',
             'moby2.detectors',
             'moby2.ephem',
             'moby2.instruments',
