@@ -1,6 +1,9 @@
 from __future__ import print_function
 from __future__ import absolute_import
 from past.builtins import basestring
+
+import os
+import glob
 import numpy as np
 from moby2.libactpol import get_nearest
 
@@ -42,6 +45,27 @@ class AuxChannel:
         if spline:
             return interp.InterpolatedUnivariateSpline(self.data[0], self.data[1])
         return interp.interp1d(self.data[0], self.data[1])
+
+    def _load_ascii_weather(self, prefix, ctime_range=None):
+        """Load data from moby standard weather archives."""
+        if ctime_range is None:
+            ctime_range = (0, 1e10)
+
+        self.sources = []
+        self.ctime_range = ctime_range
+        epoch_start, epoch_stop = ctime_range
+        self.data = np.zeros((2,0))
+
+        t_low = epoch_start   # this will prevent us from accidental overlap
+        for t0, t1, filename in get_weather_files(prefix):
+            if t1 < t_low or t0 > epoch_stop:
+                self.sources.append((filename, 0))
+                continue
+            d = read_simple_data(filename, epoch_start, epoch_stop)
+            self.sources.append((filename, len(d)))
+            if len(d):
+                self.data = np.hstack((self.data, d))
+            t_low = t1
 
 
 def seek_ctime(ifile, ctime):
@@ -94,3 +118,39 @@ def seek_ctime(ifile, ctime):
     ifile.seek(offset)
     return ifile
     
+
+def read_simple_data(filename, epoch_start, epoch_stop):
+    fin = open(filename, 'r')
+    seek_ctime(fin, epoch_start)
+    rows = []
+    for line in fin:
+        entry = line.split()
+        date = float(entry[0])
+        if ((date >= epoch_start) and (date < epoch_stop)):
+            rows.append((date, float(entry[1])))
+        elif (date >= epoch_stop):
+            break
+    return np.transpose(rows)
+
+
+def get_weather_files(prefix):
+    """
+    Find weather data files in target_dir.  Filenames must have format
+
+         <prefix>_<start>_<end>.dat
+
+    Where start and end are integer ctimes and prefix can have path
+    components in it.  Returns a list of tuples
+         (filename, start, end)
+
+    """
+    files = glob.glob('%s_*.dat' % prefix)
+    data = []
+    for f in files:
+        try:
+            t0, t1 = f.split('/')[-1].rstrip('.dat').split('_')[-2:]
+            data.append((int(t0), int(t1), f))
+        except:
+            raise RuntimeError(
+                'get_weather_files: error parsing filename "%s"' % f)
+    return sorted(data)
