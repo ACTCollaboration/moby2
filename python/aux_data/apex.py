@@ -27,6 +27,8 @@ class WeatherChannel(tools.AuxChannel):
         cfg = moby2.user_cfg.get('APEX_weather', {})
         if source_dir is None:
             source_dir = cfg.get('targets_directory')
+        if source_dir is None:
+            source_dir = os.path.join(moby2.user_cfg.get('aux_data', '/'), 'apex_weather/targets')
         if ctime_range is None:
             ctime_range = cfg.get('ctime_range')
         self._load_ascii_weather(os.path.join(source_dir, 'APEX_%s' % channel_name))
