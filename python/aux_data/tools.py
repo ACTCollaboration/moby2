@@ -73,42 +73,43 @@ def seek_ctime(ifile, ctime):
     Binary search for ctime in first column of ascii file.  Stops with
     file pointer at the start of the first row having t >= ctime.
 
-    ifile is an open file object, or a filename.
+    ifile is an open file object, positioned at the start of a line,
+    or a filename.
     
-    Returns the file.
+    Returns the open file, queued.
     """
     if isinstance(ifile, basestring):
-        iofile = open(ifile)
-    step = 10000       # bytes
+        ifile = open(ifile)
+    step = 1000        # bytes
     bounds = [0, None] # upper and lower offset boundaries
-    # First search upwards
+    offset = ifile.tell()
     for counter in range(50):
+        last_offset = offset
+        line = ifile.readline()  # Read a real line
+        if len(line) == 0:
+            ifile.seek(0, 2)
+            bounds[1] = ifile.tell()
+        else:
+            t = float(line.split()[0]) 
+            if t < ctime:
+                bounds[0] = offset + len(line)
+            else:
+                bounds[1] = offset
+        if bounds[1] == bounds[0]:
+            break
         if bounds[1] is not None:
-            step = (bounds[1] - bounds[0])/2
+            step = (bounds[1] - bounds[0]) // 2
         else:
             step *= 4
         offset = bounds[0] + step
         ifile.seek(offset)
-        new_bounds = [b for b in bounds]
-        if offset != 0:  # Eat a \n ?
-            offset += len(ifile.readline())
-        line = ifile.readline()  # Read a real line
-        # Check it
-        if len(line) == 0:
-            ifile.seek(0, 2)
-            new_bounds[1] = ifile.tell()
-        else:
-            t = float(line.split()[0]) 
-            if t >= ctime:
-                new_bounds[1] = offset
-            else:
-                new_bounds[0] = offset
-        if new_bounds == bounds:
+        # Read partial line, to the next \n
+        offset += len(ifile.readline())
+        if offset == last_offset:
             break
-        bounds = new_bounds
     else:
         print('seek_ctime died in oscillation.  Using last lower bound.')
-    ifile.seek(new_bounds[0])
+    ifile.seek(bounds[0])
     # Finish with a linear search
     while 1:
         offset = ifile.tell()
