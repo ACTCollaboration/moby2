@@ -21,6 +21,8 @@ class HKChannel(tools.AuxChannel):
         cfg = moby2.util.config.get_user_config().get('HK_lowres', {})
         if source_dir is None:
             source_dir = cfg.get('targets_directory')
+        if source_dir is None:
+            source_dir = os.path.join(moby2.user_cfg.get('aux_data', '/'), 'hk_lowres')
         if ctime_range is None:
             ctime_range = cfg.get('ctime_range')
         if ctime_range is None:
