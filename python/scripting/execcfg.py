@@ -18,6 +18,9 @@ def include(_filename):
     g = globals()
     _filename = _filename.format(**g)
     exec(open(_filename).read(), g)
+def from_yaml(_filename):
+    import yaml
+    return yaml.safe_load(open(_filename))
 
 """
 
