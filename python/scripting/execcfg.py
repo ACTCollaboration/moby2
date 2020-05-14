@@ -17,7 +17,7 @@ def namespace(k):
 def include(_filename):
     g = globals()
     _filename = _filename.format(**g)
-    exec(open(_filename), g)
+    exec(open(_filename).read(), g)
 
 """
 
