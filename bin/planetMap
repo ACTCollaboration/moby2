@@ -581,6 +581,17 @@ for tod_file in tod_files:
     all_dets_plot(tod.ctime, tod.data, title='%s - source masked' % tod.info.name)
     outputm.savefig('tod_009.png')
 
+    # Sanity cuts.
+    n1 = len(tod.cuts.get_uncut())
+    taus_ok = (taus>0)*(taus<.1)
+    for label, ok_dets in [('calibration', cal_mask),
+                           ('time_constants', taus_ok),
+                           ('focal_plane', tod.fplane.mask)]:
+        if (~ok_dets).sum():
+            trace(2, "Sanity check on %s cuts %i detectors" % (label, (~ok_dets).sum()))
+            tod.cuts.set_always_cut((~ok_dets).nonzero()[0])
+    n2 = len(tod.cuts.get_uncut())
+    trace( 2, "Sanity cuts took live dets from %i to %i.\n" % (n1,n2))
 
 
     # Also plot everything.
@@ -677,18 +688,6 @@ for tod_file in tod_files:
         live_dict = moby2.detectors.DetectorList(
             det_uid=tod.cuts.get_uncut(det_uid=True))
         live_dict.write(live_list)
-
-    # Sanity cuts.
-    n1 = len(tod.cuts.get_uncut())
-    taus_ok = (taus>0)*(taus<.1)
-    for label, ok_dets in [('calibration', cal_mask),
-                           ('time_constants', taus_ok),
-                           ('focal_plane', tod.fplane.mask)]:
-        if (~ok_dets).sum():
-            trace(2, "Sanity check on %s cuts %i detectors" % (label, (~ok_dets).sum()))
-            tod.cuts.set_always_cut((~ok_dets).nonzero()[0])
-    n2 = len(tod.cuts.get_uncut())
-    trace( 2, "Sanity cuts took live dets from %i to %i.\n" % (n1,n2))
 
     # Time for a picture.
     for i in tod.cuts.get_uncut():
