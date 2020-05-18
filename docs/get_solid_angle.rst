@@ -4,7 +4,7 @@
 ``get_solid_angle`` - Compute basic beam parameters
 ===================================================
 
-This script lives in analysis.beam_ana.  Its purpose is to analyze
+This script lives in ``analysis.beam_ana``.  Its purpose is to analyze
 planet maps and produce some basic beam statistics, such as FWHM and
 solid angle.  This code should give fairly high fidelity results,
 suitable for precision calibration work but somewhat less
@@ -13,21 +13,14 @@ sophisticated than a full beam analysis.
 Analyzing a set of maps
 =======================
 
-Get a recent config file from
-http://abs-inthe.princeton.edu/~mhasse/distribution/beams/
+An example configuration file can be found below.  To use it as is,
+create an ascii file called map_list.txt with the path to each map you
+want to analyze.  If the band code (e.g. f150) and TOD name are not
+obvious from the filename, then you might need to use a 2-column
+format that gives the basename and frequency separately.  See detailed
+configuration options below.
 
-To get the latest version (for which the following information will
-hopefully apply), execute this in your working directory:
-
-.. code-block:: bash
-  
- wget http://abs-inthe.princeton.edu/~mhasse/distribution/beams/get_solid_angle.zip
- unzip get_solid_angle.zip
-
-Copy the input file from the unzipped folder.  Edit the file to point
-to your beam maps.  If you want the code to make frequency
-band-dependent decisions on the maps, the filename should contain the
-frequency code (e.g. f090, f150, etc.).
+To run the script:
 
 .. code-block:: bash
   
@@ -38,8 +31,15 @@ This produces a few plots for each beam map, and an output file
 can be loaded through StructDB and reduced further, e.g. to get an
 average solid angle and associated error estimate.
 
+Some basic summarization can be triggered through the output.summaries
+configuration settings; see below.
+
+
 Configuration options
 =====================
+
+For a starting point, see this example: 
+:download:`get_solid_angle.in <params/get_solid_angle.in>`.
 
 The main groups in the configuration file are:
 
@@ -48,14 +48,18 @@ The main groups in the configuration file are:
 * ``analysis``
 * ``output``
 
+The configuration file is parsed by the ``solid_angle``
+:meth:`~moby2.analysis.beam_ana.util.driver` method.
 
-Configuration: ``source_maps``
-------------------------------
+
+``source_maps`` block
+---------------------
 
 ``'source': <map_list_args>``
 
-  This is passed to get_map_list.  The most probably thing here is
-  something along the lines of ``('glob', './maps/map*.fits')``.
+  This is a tuple that is used as the ``params`` for
+  :meth:`~moby2.analysis.beam_ana.util.get_map_list`.  An example is
+  ``('file', 'map_list.txt')``.
 
 
 ``'basename_extractor': <extractor>``
@@ -63,13 +67,13 @@ Configuration: ``source_maps``
   Specify the extractor to use for creating a map name from the map
   filenames.  If you're globbing for files, and the path/filename
   contain both the map basename and the frequency, then use
-  'standard_freq'.  If you're working with combined files where the
+  ``'standard_freq'``.  If you're working with combined files where the
   path/filename doesn't contain a TOD name, you might just want to use
   'filename'.
 
 
-Configuration: ``analysis``
-------------------------------
+``analysis`` block
+------------------
 
 ``'mask_radii_arcmin': <tuple>``
 
@@ -104,3 +108,41 @@ Configuration: ``analysis``
 
   If True, map coords are adjusted to remove the beam centroid.
   Defaults to True.
+
+
+``output`` block
+----------------
+
+``'prefix'': <path-like>``
+
+  Sets the prefix for output (note you need a trailing ``/`` if it's a
+  directory).  A bunch of plots, a log of the fit output, and
+  ``table.fits`` will be written there.
+
+``'summaries': <list of dicts>``
+
+  A list of instructions for summary computations.  Each dict is used
+  as parameters for the
+  :meth:`~moby2.analysis.beam_ana.solid_angle.summary_op` function.
+  Probably the only think you need to worry about is the key ``'select'``,
+  the value of which will be passed to
+  :meth:`~moby2.analysis.beam_ana.util.get_obs_mask` to restrict the
+  set of maps included in each average.
+
+
+Reference
+=========
+
+Selected methods from beam_ana.solid_angle
+''''''''''''''''''''''''''''''''''''''''''
+
+.. autofunction:: moby2.analysis.beam_ana.solid_angle.driver
+
+.. autofunction:: moby2.analysis.beam_ana.solid_angle.summary_op
+
+Selected methods from beam_ana.util
+'''''''''''''''''''''''''''''''''''
+
+.. autofunction:: moby2.analysis.beam_ana.util.get_map_list
+
+.. autofunction:: moby2.analysis.beam_ana.util.get_obs_mask
