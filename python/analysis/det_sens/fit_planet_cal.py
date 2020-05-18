@@ -73,6 +73,28 @@ def update_cascade(defaults, params):
     return output
         
 def load_amplitudes(params, info_dict):
+    """Read planet peak heights from some kind of file.  The ``info_dict``
+    will be used to format the filename according to what data subset
+    is being analyzed.  The ``params`` argument is a dict that looks
+    like one of these:
+
+      {'type': 'quick_pick',
+       'filename': 'quick_beam.pik',
+       'field': 'gaussian_amp',
+       'masks': ...,      #optional
+       'also_load': ...,  #optional
+      }
+
+      {'type': 'column_file',
+       'filename': 'peaks_{fcode}.txt',
+       'columns': [0,1],  #optional
+      }
+
+      {'type': 'solid_angle',
+       'filename': 'solid_angle/table.fits'
+      }
+
+    """
     atype = params['type']
     also = {}
     if atype == 'quick_pik':
@@ -92,6 +114,12 @@ def load_amplitudes(params, info_dict):
         filename = params['filename'].format(**info_dict)
         columns = params.get('columns', [0,1])
         basenames, amps = moby2.util.ascii.read_columns(filename, columns)
+
+    elif atype == 'get_solid_angle':
+        # Output from the get_solid_angle script.
+        filename = params['filename'].format(**info_dict)
+        db = moby2.util.StructDB.from_fits_table(filename)
+        basenames, amps = db['name'], db['quick_peak']
 
     # Frequency band sanity.
     if 'freq_code' in info_dict:
