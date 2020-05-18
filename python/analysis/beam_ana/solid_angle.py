@@ -7,6 +7,7 @@ from . import util
 from . import beam_obs
 
 import numpy as np
+import os
 
 fitsMap = moby2.mapping.fits_map.fitsMap
 DEG = np.pi/180
@@ -249,13 +250,51 @@ def process_map(B, F, params={}, freq=None, context=None):
     return row
 
 
+def summary_op(params, data, cat, mask=None, verbose=False):
+    """Process the solid angle fit info in data, according to the
+    parameters in params, using the matched obs_catalog in cat.
+    Optionally apply mask to the data, too.
+
+    The params should be a simple dictionary with entry 'select'::
+
+      {'select': [...]}
+
+    The list is passed to util.get_obs_mask.  Results are
+    automatically grouped by band and array (pa).
+
+    """
+    def vprint(*args, **kwargs):
+        if verbose:
+            print(*args, **kwargs)
+    s0, n = util.get_obs_mask(cat, params['select'])
+    if mask is not None:
+        s0 *= mask
+    pas = sorted(list(set(cat['pa'][s0])))
+    bands = sorted(list(set(data['band'][s0])))
+    grouped = {}
+    for pa in pas:
+        grouped[pa] = {}
+        for band in bands:
+            grouped[pa][band] = {}
+            s = s0 * (cat['pa'] == pa) * (data['band'] == band)
+            vprint(pa, band, s.sum())
+            if s.sum() == 0: continue
+            for k in ['om_inner', 'om_outer', 'om_total']:
+                y = data[k][s]
+                vprint ('  %-10s  %8.3f  %8.3f' % (k, y.mean(), y.std()))
+                grouped[pa][band][k] = (y.mean(), y.std())
+    return grouped
+
+
 def driver(args):
-    from optparse import OptionParser
-    o = OptionParser(usage="%prog [options] param_file")
-    opts, args = o.parse_args(args)
-    if len(args) < 1:
-        o.error("Provide a parameters file as first argument.")
-    params = moby2.util.MobyDict.from_file(args[0])
+    from argparse import ArgumentParser
+    o = ArgumentParser()
+    o.add_argument('param_file')
+    o.add_argument('-r', '--refit', action='store_true')
+    o.add_argument('-u', '--update', action='store_true')
+    args = o.parse_args(args)
+
+    params = moby2.util.MobyDict.from_file(args.param_file)
 
     outputm = moby2.scripting.OutputFiler(
         prefix=params.get_deep(('output', 'prefix'), './'))
@@ -266,20 +305,42 @@ def driver(args):
     logger.set_file(outputm.get_filename('output.txt'), append=False)
     logger.show_time = False
     
-    # Get map list.
-    basenames, filenames = util.get_map_list(params['source_maps'])
-
-    rows = []
-    for B,F in zip(basenames, filenames):
-        row = process_map(B, F, params['analysis'],
-                          context=context)
-        rows.append(row)
-        
-    # Bundle it.
-    header = list(zip(*rows[0]))[0]
-    columns = list(map(np.array, list(zip(*[list(zip(*row))[1] for row in rows]))))
-    odb = moby2.util.StructDB.from_data(list(zip(header, columns)))
-
+    # Line-by-line results file
     ofile = outputm.get_filename('table.fits')
-    logger('\n\nWriting results to %s' % ofile)
-    odb.to_fits_table(ofile)
+
+    if not os.path.exists(ofile):
+        args.refit = True
+
+    if args.refit:
+        # Get map list.
+        basenames, filenames = util.get_map_list(params['source_maps'])
+
+        rows = []
+        for B,F in zip(basenames, filenames):
+            row = process_map(B, F, params['analysis'],
+                              context=context)
+            rows.append(row)
+        
+        # Bundle it.
+        header = list(zip(*rows[0]))[0]
+        columns = list(map(np.array, list(zip(*[list(zip(*row))[1] for row in rows]))))
+        odb = moby2.util.StructDB.from_data(list(zip(header, columns)))
+
+        logger('\n\nWriting results to %s' % ofile)
+        odb.to_fits_table(ofile)
+
+    # Summary operations.
+    summary_ops = params.get_deep(('output', 'summaries'))
+    if summary_ops is None or len(summary_ops) == 0:
+        print('No summary operations defined in param file.')
+    else:
+        print('Reading %s for summary operations...' % ofile)
+        data = moby2.util.StructDB.from_fits_table(ofile)
+        cat = moby2.scripting.get_obs_catalog()
+        basename = [x.split('_')[0] for x in data['name']]
+        idx = cat.select_inner({'tod_name': basename})
+        cat = cat[idx]
+
+        for i, summary_params in enumerate(summary_ops):
+            print('Processing summary block %i...' % i)
+            results = summary_op(summary_params, data, cat, verbose=True)

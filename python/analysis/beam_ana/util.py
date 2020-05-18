@@ -177,14 +177,12 @@ def get_obs_mask(obs_db, rules):
 
     rules is a list of simple selection rules to apply to the vectors
     in obs_db.  The results of the rule applications are and-ed
-    together to get a mask.  Rules take the form of
+    together to get a mask.  Rules must be of one of the following forms::
 
-    (key, rule_type, args)
-
-    Where key is a field in obs_db, and rule_type/args come from:
         (key, 'in', [item1,item2])
         (key, 'range', (lo, hi))
         (key, 'range_mod', (lo, hi, modulus))
+
     """
     mask = np.ones(len(obs_db), bool)
     counts = []
