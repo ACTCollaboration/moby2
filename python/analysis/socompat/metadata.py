@@ -170,28 +170,23 @@ def load_detoffsets_file(position, polarization, pa=None):
 
     # The coordinate convention for ACT and SO is ever-so-slightly
     # different.  Here's the libactpol construction:
+    #
     #    Quaternion_r3(q, -pol_angle);
     #    Quaternion_r2_mul(focalplane_x, q);
     #    Quaternion_r1_mul(-focalplane_y, q);
-
+    #
     # Note focalplane_{x,y} correspond to moby2.FocalPlane.{y,x}.
     # Also pol_angle is FocalPlane.phi - pi/2.
     #
-    # This will differ from SO construction by O(x^3 + y^4).
+    # The SO (xi, eta) will differ from (act_x, act_y) by O(x^3 + y^4).
     DEG = np.pi/180
-    q = (so3g.proj.quat.euler(0, -aman['act_x']) *
-         so3g.proj.quat.euler(1,  aman['act_y']) *
+    q = (so3g.proj.quat.euler(0,  aman['act_x']) *
+         so3g.proj.quat.euler(1, -aman['act_y']) *
          so3g.proj.quat.euler(2, np.pi/2 - aman['act_pol']*DEG))
-    aman.wrap('q', np.array(q), [(0, 'dets')])
 
-    # The SO projection coordinates xi and eta:
-    theta, phi, gamma_minus_phi = so3g.proj.quat.decompose_iso(q)
-    gamma = gamma_minus_phi + phi
-    gamma[(theta == 0) * (phi == 0)] = 0.
-
-    aman.wrap('xi',  theta * np.cos(phi), [(0, 'dets')])
-    aman.wrap('eta', theta * np.sin(phi), [(0, 'dets')])
-    aman.wrap('gamma', gamma, [(0, 'dets')])
+    xieta = so3g.proj.quat.decompose_xieta(q)
+    for i, k in enumerate(['xi', 'eta', 'gamma']):
+        aman.wrap(k, xieta[i], [(0, 'dets')])
 
     return aman
 
