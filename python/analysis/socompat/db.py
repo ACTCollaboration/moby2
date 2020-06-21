@@ -2,7 +2,7 @@
 #
 
 import moby2
-from sotodlib.io import metadata
+from sotodlib.core import metadata
 
 __all__ = ['make_detdb', 'make_obsdb']
 
