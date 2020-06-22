@@ -16,3 +16,4 @@ Module list:
   quick_beam
   det_sens
   get_solid_angle
+  fit_planet_cal
