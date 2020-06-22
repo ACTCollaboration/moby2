@@ -1,15 +1,20 @@
 from __future__ import print_function
 from __future__ import absolute_import
 from past.builtins import basestring
-mpi_ok = False
-try:
-    from mpi4py import MPI
-    mpi_ok = True
-except:
-    pass
+
+# Set to True or False once import of mpi4py has been attempted.
+mpi_ok = None
+
 
 class MobyMPI:
     def __init__(self, use=True, force=False):
+        global mpi_ok
+        try:
+            from mpi4py import MPI
+            mpi_ok = True
+        except:
+            mpi_ok = False
+
         use = use and (mpi_ok or force)
         if use:
             if not mpi_ok:
