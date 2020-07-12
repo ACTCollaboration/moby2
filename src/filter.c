@@ -913,6 +913,7 @@ static PyObject *find_jumps(PyObject *self, PyObject *args)
             if (fabs(jump_j) > jump[i]) jump[i] = fabs(jump_j);
         }
     }
+    free(data);
     return jump_array;
 }
 
