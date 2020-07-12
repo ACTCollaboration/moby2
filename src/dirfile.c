@@ -489,6 +489,7 @@ static PyObject *dirfile_load_channels(PyObject *self, PyObject *args)
             any_errors = 1;
         }
     }
+    if (!conv.raw) free(buf);
     }
     
     Py_END_ALLOW_THREADS
