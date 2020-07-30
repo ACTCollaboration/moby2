@@ -499,28 +499,29 @@ def get_focal_plane(params, tod_info=None, det_uid=None, tod=None):
     Optionally add polarization angle information and pointing
     offsets.
 
-    params is a dict with blocks describing different actions.
+    params is a dict with blocks describing different actions::
 
-    params = {
-      'detector_offsets': {...},
-      'polarization_angles': {...},
-      'pointing_shifts': {...},
-    }
+      params = {
+        'detector_offsets': {...},
+        'polarization_angles': {...},
+        'pointing_shifts': {...},
+      }
 
     Parameters in detector_offsets are passed to get_detector_offsets;
     parameters in pol_source (if not None) are passed to
     get_polarization angles.  Parameters in shift_generator are passed
     to get_pointing_offset.
     
-    E.g.:
+    E.g.::
     
-    params = {
-      'detector_offsets': {
-         'format': 'fp_file',
-         'filename': 'template_ar1_130821s.txt' },
-    }
+      params = {
+        'detector_offsets': {
+           'format': 'fp_file',
+           'filename': 'template_ar1_130821s.txt' },
+      }
 
     Depending on params, tod_info and stuff may be inspected.
+
     """
     if '_execcfg' in params:
         tod_id = get_tod_id(tod=tod, tod_info=tod_info)
