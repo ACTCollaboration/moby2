@@ -16,11 +16,11 @@ class TODRecord:
         self.fields = []
 
     @classmethod
-    def from_database(cls, tdb, id_=None):
+    def from_database(cls, tdb, mce_id=None):
         """
         Load TOD information from ACTpol manifest over database
         connection tdb, which must be an actpol.TODDatabase instance.
-        id_ should be the mce_data_acq_id, or basename.
+        mce_id should be the mce_data_acq_id, or basename.
         """
         self = cls()
         c = tdb.db.cursor()
@@ -29,8 +29,8 @@ class TODRecord:
         basename = None
 
         #Convert basename to mce_data_acq_id?
-        if isinstance(id_, basestring):
-            basename = id_.strip('/').split('/')[-1]
+        if isinstance(mce_id, basestring):
+            basename = mce_id.strip('/').split('/')[-1]
             # Does this match a datafile?
             q = 'select id from %s where producer="merlin" and '\
                 'name="%s" or name="%s.zip"' % \
@@ -41,7 +41,7 @@ class TODRecord:
             # mce_data_acq_id.
             basename_tokens = basename.split('.')
             if len(basename_tokens) != 3:
-                raise ValueError("Could not decode basename in '%s'" % id_)
+                raise ValueError("Could not decode basename in '%s'" % mce_id)
             ctime, ar = int(basename_tokens[0]), basename_tokens[2]
             q = 'select id from %s where '\
                 'ctime=%i and array="%s"' % \
@@ -49,17 +49,17 @@ class TODRecord:
             if c.execute(q) <= 0:
                 raise ValueError("mce_data_acq entry not found for "\
                     "ctime=%i, array=%s" % (ctime, ar))
-            id_ = c.fetchone()[0]
+            mce_id = c.fetchone()[0]
         else:
             if c.execute('select ctime,array from %s where '
-                         'id=%i' % (tdb._table('mce_data_acq'), id_)) == 0:
+                         'id=%i' % (tdb._table('mce_data_acq'), mce_id)) == 0:
                 raise valueError("mce_data_acq entry not found for "\
-                    "id=%i" % id_)
+                    "id=%i" % mce_id)
             ctime, ar = c.fetchone()
 
         # Start with tod_info fields
         q = 'select * from %s where mce_data_acq_id=%i' % \
-            (tdb._table('tod_info'), id_)
+            (tdb._table('tod_info'), mce_id)
         n = c.execute(q)
         if n == 0:
             return None
@@ -120,21 +120,21 @@ class TODRecord:
 class AcquisitionRecord(TODRecord):
 
     @classmethod
-    def from_database(cls, tdb, id_, ar=None):
+    def from_database(cls, tdb, mce_id, ar=None):
         """
         Load ACQ information from ACTpol manifest over database
         connection db, which must be an actpol.TODDatabase instance.
-        id_ should be the mce_data_acq_id.  Alternately id_ may be the
+        mce_id should be the mce_data_acq_id.  Alternately mce_id may be the
         MCE filename (<ctime>_<suffix> format), but this requires the
         array name to also be passed in.
         """
         c = tdb.db.cursor()
 
         #Convert basename to mce_data_acq_id?
-        if isinstance(id_, basestring):
-            basename_tokens = id_.strip('/').split('/')[-1].split('_')
+        if isinstance(mce_id, basestring):
+            basename_tokens = mce_id.strip('/').split('/')[-1].split('_')
             if len(basename_tokens) != 2:
-                raise ValueError("Could not decode MCE filename in '%s'" % id_)
+                raise ValueError("Could not decode MCE filename in '%s'" % mce_id)
             ctime, suffix = int(basename_tokens[0]), basename_tokens[1]
             q = 'select *, concat(ctime,"_",suffix) as mce_name '\
                 'from %s where '\
@@ -143,7 +143,7 @@ class AcquisitionRecord(TODRecord):
         else:
             q = 'select *, concat(ctime,"_",suffix) as mce_name '\
                 'from %s where '\
-                'id=%i' % (tdb._table('mce_data_acq'), id_)
+                'id=%i' % (tdb._table('mce_data_acq'), mce_id)
         n = c.execute(q)
         if n == 0:
             return cls()
@@ -153,11 +153,11 @@ class AcquisitionRecord(TODRecord):
 class HKRecord(TODRecord):
 
     @classmethod
-    def from_database(cls, tdb, id_, ar=None):
+    def from_database(cls, tdb, merlin_id, ar=None):
         """
         Load HK archive information from ACTpol manifest over database
         connection db, which must be an actpol.TODDatabase instance.
-        id_ should be the merlin.id.  Alternately id_ may be the
+        merlin_id should be the merlin.id.  Alternately merlin_id may be the
         basename.
         """
         c = tdb.db.cursor()
@@ -168,12 +168,12 @@ class HKRecord(TODRecord):
             'from {merlin} join {datafiles} on '\
             '{merlin}.datafile_id = {datafiles}.id '
         #Convert basename to merlin.id?
-        if isinstance(id_, basestring):
-            basename = id_.strip('/').split('/')[-1]
+        if isinstance(merlin_id, basestring):
+            basename = merlin_id.strip('/').split('/')[-1]
             q += 'where {datafiles}.name="{basename}"'
         else:
             q += 'where {merlin}.id={id_}'
-        n = c.execute(q.format(basename=basename,id_=id_,**tables))
+        n = c.execute(q.format(basename=basename,id_=merlin_id,**tables))
         if n == 0:
             return cls()
         return cls.from_cursor(c)
@@ -203,12 +203,12 @@ class TODDatabase:
     def _table(self, table):
         return self.table_prefix + table
 
-    def get_record(self, id_):
+    def get_record(self, acq_id):
         """
-        Return a TODRecord for the id_ specified, which must be either
+        Return a TODRecord for the acq_id specified, which must be either
         the mce_data_acq_id or a basename/filename.
         """
-        return TODRecord.from_database(self, id_)
+        return TODRecord.from_database(self, acq_id)
 
     def select_tods(self, fields=None, clauses=[], id_only=False,
                     order=None,
@@ -286,12 +286,13 @@ class TODDatabase:
         that's too slow, get raw DB rows by passing id_only=True or
         passing a list of desired fields in fields.
 
-        Example:
+        Example::
 
-           tdb = TODDatabas()
+           tdb = TODDatabase()
            recs = tdb.select_acqs(array='ar1', suffix='iv',
                                   ctime=(1379703312, 1379789712))
            prints recs[0].to_string()
+
         """
         clauses = [c for c in clauses] + self._assemble_clauses(kwargs)
         if fields is None:
