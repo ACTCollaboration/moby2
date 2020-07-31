@@ -17,6 +17,7 @@ scripts = [
     'fp_realign',
     'get_cal_noise',
     'fit_planet_cal',
+    'refit_planet_cal',
     'get_array_sens',
     'obs_catalog',
     'get_solid_angle'
@@ -89,6 +90,10 @@ elif cmd == 'get_cal_noise':
 elif cmd == 'fit_planet_cal':
     from moby2.analysis import det_sens
     det_sens.fit_planet_cal.main(sys.argv[2:])
+
+elif cmd == 'refit_planet_cal':
+    from moby2.analysis import det_sens
+    det_sens.refit_planet_cal.main(sys.argv[2:])
 
 elif cmd == 'get_array_sens':
     from moby2.analysis import det_sens
