@@ -248,7 +248,7 @@ class FPFitFile(moby2.detectors._SimpleDetData):
         r = ((x-x0)**2 + (y-y0)**2)**.5
         window = np.median(r)*3
         inside = r < params.get('zoom', scale*window)
-        pl.scatter(x, y, alpha=0.5)
+        pl.scatter(x, y, alpha=0.2)
         if params.get('limits') is None:
             if np.any(inside):
                 for vect,limiter in [(x,pl.xlim), (y,pl.ylim)]:
@@ -287,7 +287,8 @@ class FPFitFile(moby2.detectors._SimpleDetData):
             # Mark bad fits with an x.
             if bads is None:
                 bads = ~s
-            pl.scatter(cols[bads], rows[bads], marker='x', edgecolor='gray')
+            pl.scatter(cols[bads], rows[bads], marker='x', s=5, edgecolor='gray')
+
         def limit_args(data, kw={}):
             lo, hi = data.min(), data.max()
             if s.sum() > 1:
@@ -336,16 +337,27 @@ class FPFitFile(moby2.detectors._SimpleDetData):
         pl.title('Time constant errors (ms)', fontsize=title_fs)
         imshow_reformat()
 
-        if self.ok.sum() > 10:
+        fcodes = sorted(list(set(array_data['fcode'])))
+        _, tbins = np.histogram(self.tau[self.ok]*1e3, bins=20) #min(20,self.ok.sum()/10)
+        _, ebins = np.histogram(self.tau[self.ok]*1e3, bins=max(5, self.ok.sum()//10))
+
+        for fcode in fcodes:
+            if fcode == 'f000': continue
+            fs = array_data['fcode'][self.det_uid] == fcode
+            s = self.ok * fs
             pl.subplot(2,2,3)
-            pl.hist(self.tau[self.ok]*1e3, bins=20) #min(20,self.ok.sum()//10)
+            pl.hist(self.tau[s]*1e3, bins=tbins, alpha=.5, label=fcode)
             pl.xlabel('Time constant (ms)')
             pl.ylabel('N_dets')
             pl.subplot(2,2,4)
-            pl.hist(self.tau_err[self.ok]*1e3, bins=self.ok.sum()//10)
+            pl.hist(self.tau_err[s]*1e3, bins=ebins, alpha=.5, label=fcode)
             pl.xlabel('Time constant errors (ms)')
             pl.ylabel('N_dets')
 
+        pl.subplot(2,2,3)
+        pl.legend(loc='upper right')
+        pl.subplot(2,2,4)
+        pl.legend(loc='upper right')
         pl.savefig(filename+'time_const.png')
         pl.clf()
  
