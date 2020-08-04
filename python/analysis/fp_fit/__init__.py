@@ -12,3 +12,4 @@ from .fp_file import FPFitFile
 from .fp_file import FPTemplateFitter
 from .fp_source import BeamModel
 from . import flatfield
+from . import realign

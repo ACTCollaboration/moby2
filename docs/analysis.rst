@@ -12,6 +12,7 @@ Module list:
 
 .. toctree::
   fp_fit
+  fp_realign
   planet_mapping
   quick_beam
   det_sens

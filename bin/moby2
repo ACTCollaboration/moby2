@@ -14,6 +14,7 @@ scripts = [
     'get_fpfit_planetcal',
     'get_map_planetcal',
     'get_fiducial',
+    'fp_realign',
     'get_cal_noise',
     'fit_planet_cal',
     'get_array_sens',
@@ -76,6 +77,10 @@ elif cmd == 'get_map_planetcal':
 elif cmd == 'get_fiducial':
     from moby2.analysis import fp_fit
     fp_fit.flatfield.get_fiducial_main(sys.argv[2:])
+
+elif cmd == 'fp_realign':
+    from moby2.analysis import fp_fit
+    fp_fit.realign.main(sys.argv[2:])
 
 elif cmd == 'get_cal_noise':
     from moby2.analysis import det_sens
