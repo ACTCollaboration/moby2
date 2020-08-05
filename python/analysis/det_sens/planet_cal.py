@@ -63,7 +63,7 @@ def get_planet_solid_angle(planet, ctime):
             results.append(omega)
         # Corrections?
         if planet in ['uranus', 'jupiter']:
-            efactor = solid_angle_correction(ctime, planet)
+            efactor = solid_angle_correction(np.asarray(ctime), planet)
             results = [om*e for om,e in zip(results, efactor)]
         else:
             raise RuntimeError("Solid angle correction factor not "
