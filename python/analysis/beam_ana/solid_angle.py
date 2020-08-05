@@ -283,6 +283,23 @@ def summary_op(params, data, cat, mask=None, verbose=False):
                 y = data[k][s]
                 vprint ('  %-10s  %8.3f  %8.3f' % (k, y.mean(), y.std()))
                 grouped[pa][band][k] = (y.mean(), y.std())
+            # FWHM business...
+            phi = data['fwhm_ang'][s] * DEG
+            P = data['fwhm_maj'][s] - data['fwhm_min'][s]
+            Q = P * np.cos(2*phi)
+            U = P * np.sin(2*phi)
+            subd = {'fwhm': data['fwhm'][s],
+                    'fwhm_Q': Q,
+                    'fwhm_U': U}
+            for k, y in subd.items():
+                vprint ('  %-10s  %8.3f  %8.3f' % (k, y.mean(), y.std()))
+                grouped[pa][band][k] = (y.mean(), y.std())
+            I, Q, U = [grouped[pa][band][k][0] for k in ['fwhm', 'fwhm_Q', 'fwhm_U']]
+            P = np.sqrt(Q**2+U**2)
+            vprint ('  %-10s  %8.3f' % ('fwhm_maj', I + P))
+            vprint ('  %-10s  %8.3f' % ('fwhm_min', I - P))
+            vprint ('  %-10s  %8.3f' % ('fwhm_ang', np.arctan2(U, Q)/2/DEG))
+
     return grouped
 
 
