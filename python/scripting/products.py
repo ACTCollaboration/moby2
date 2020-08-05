@@ -979,6 +979,8 @@ def get_calibration(params, tod_info=None, det_uid=None, tod=None):
     if step['type'] == 'flatfield':
         ff_cal = get_flatfield(step, tod_info=tod_info)
         ok, recal = ff_cal.get_property('cal', det_uid)
+        if step['fiducial']:
+            ok *= ff_cal.get_property('stable')[1].astype(bool)[1]
         cal.cal *= recal
         cal.cal[~ok] = 0.
         return cal
