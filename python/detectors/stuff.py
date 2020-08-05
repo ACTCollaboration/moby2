@@ -439,4 +439,6 @@ class CalibrationArchive(moby2.util.HDFArchive):
     _moby2_class_name = 'tod_cal_archive'
     _moby2_class_version = 0
     _moby2_read_func = Calibration.from_hdf
-    _moby2_write_func = Calibration.write_hdf
+
+    def _moby2_write_func(self, item, dest):
+        return item.write_hdf(dest)
