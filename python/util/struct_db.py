@@ -156,7 +156,7 @@ class StructDB(np.ndarray):
             if len(i) > 0:
                 matched[ip] = i
         if mask:
-            mask = np.zeros(self.ndets, 'bool')
+            mask = np.zeros(len(self), 'bool')
             mask[matched[matched>=0]] = True
             return mask
         return matched
@@ -253,7 +253,15 @@ class StructDB(np.ndarray):
         return hdu
 
     @classmethod
-    def from_hdf(cls, filename=None, dataset=None, group=None):
+    def from_hdf(cls, filename=None, dataset=None, group=None, retype_strings=True):
+        """Instantiate a StructDB from data in an HDF5 file (presumably
+        written by to_hdf() method in this class).  Pass the filename
+        and either a dataset name or a group name.
+
+        Unless retype_strings=False, any fields encountered with
+        "bytes" type will be promoted to Unicode strings (Python3).
+
+        """
         import h5py
         if isinstance(filename, basestring):
             hfile = h5py.File(filename, 'r')
@@ -273,14 +281,22 @@ class StructDB(np.ndarray):
                     (hfile.filename, dataset.name, [v.name for k,v in items]))
             self = cls(len(items[0][1]), dt)
             for k,v in items:
+                if retype_strings:
+                    v = moby_fits._retyped_for_read(v)
                 self[str(k)] = v
         else:
             if dataset is None:
                 dataset = '/'
             if isinstance(dataset, basestring):
                 dataset = hfile[dataset]
-            self = cls(dataset.shape, dataset.dtype)
-            self[:] = dataset.value
+            # Alas, Unicode.
+            if retype_strings:
+                restrung_data = [(n, moby_fits._retyped_for_read(dataset[n]))
+                                 for n in dataset.dtype.names]
+                self = StructDB.from_data(restrung_data)
+            else:
+                self = cls(dataset.shape, dataset.dtype)
+                self[:] = dataset.value
             node = dataset
         self.formats = dict(node.attrs.get('_formats', []))
         if isinstance(filename, basestring):
@@ -288,7 +304,7 @@ class StructDB(np.ndarray):
         return self
 
     def to_hdf(self, filename, dataset=None, group=None, clobber=False,
-               compression=None):
+               compression=None, retype_strings=True):
         """
         Write the StructDB array to the indicated HDF5 file.  If a
         dataset is named, the array is written as a single, structured
@@ -296,6 +312,11 @@ class StructDB(np.ndarray):
         is written as multiple, simple datasets, with specified group
         name.  We hereby declare that the former approach should be
         taken whenever convenient.
+
+        Note that unless retype_strings is set to False, any fields with
+        Unicode type (Python3) will be stored as byte arrays, like they
+        would be in Python2.  This is the same silliness we had to do
+        with FITS.
         """
         import h5py
         if isinstance(filename, basestring):
@@ -313,11 +334,21 @@ class StructDB(np.ndarray):
                 raise RuntimeError("Location %s exists in HDF file.  Pass "
                                      "clobber=True to overwrite." % dest)
         if dataset is not None:
-            node = hfile.create_dataset(dataset, data=self, compression=compression)
+            if retype_strings:
+                restrung_data = [(n, moby_fits._retyped_for_write(self[n]))
+                                 for n in self.dtype.names]
+                output = StructDB.from_data(restrung_data, formats=self.formats)
+            else:
+                output = self
+            node = hfile.create_dataset(dataset, data=output, compression=compression)
         if group is not None:
             node = hfile.create_group(group)
             for n in self.dtype.names:
-                node.create_dataset(n, data=self[n], compression=compression)
+                if retype_strings:
+                    v = moby_fits._retyped_for_write(self[n])
+                else:
+                    v = self[n]
+                node.create_dataset(n, data=v, compression=compression)
         if len(self.formats):
             node.attrs['_formats'] = list(self.formats.items())
         if isinstance(filename, basestring):
