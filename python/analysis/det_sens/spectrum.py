@@ -322,8 +322,14 @@ class TODSpectrum:
 
     @classmethod
     def from_file(cls, filename):
-        data = np.load(filename)
-        self = cls(data['freq'], data['spec'], **data['meta'].tolist())
+        data = None
+        try:
+            data = np.load(filename)
+            meta = data['meta'].tolist()
+        except:
+            data = np.load(filename, encoding='bytes')
+            meta = {k.decode('ascii'): v for k, v in data['meta'].tolist().items()}
+        self = cls(data['freq'], data['spec'], **meta)
         return self
         
  
@@ -333,6 +339,7 @@ def get_tod_spec_main(args):
     o.add_option('-i', '--interactive-debugger', action='store_true')
     o.add_option('--no-plots', action='store_true')
     o.add_option('--force', default=False, action='store_true')
+    o.add_option('--intolerant', action='store_true')
 
     opts, args = o.parse_args(args)
 
@@ -358,6 +365,8 @@ def get_tod_spec_main(args):
         except Exception as e:
             print(e)
             result = 'failed'
+            if opts.intolerant:
+                raise e
         stats[result] += 1
 
     print('\nSummary:')
@@ -455,7 +464,14 @@ def get_tod_spec_one(config, basename, no_plots=None, force=None):
     labs, arts = list(zip(*[x[1:] for x in legends if x[0] in to_leg]))
     pl.legend(arts, labs, loc='upper right')
     pl.title(spec.meta['name'])
-    pl.xlim(1e-2, spec.f.max())
+    xlims = config['get_spec'].get('plot_spec_xlims')
+    if xlims is not None:
+        pl.xlim(*xlims)
+    else:
+        pl.xlim(1e-2, spec.f.max())
+    ylims = config['get_spec'].get('plot_spec_ylims')
+    if ylims is not None:
+        pl.ylim(*ylims)
     pl.xlabel('f [Hz]')
     pl.ylabel('Spectral density (%s/rtHz)' % spec.meta['cal_units'])
 
