@@ -556,7 +556,7 @@ static PyObject *pack_flags(PyObject *self, PyObject *args)
     uint32_t *index = PyArray_DATA(index_array);
 
     const int max_flagword = 16;
-    assert(n_flagword <= max_flagvec);
+    assert(n_flagword <= max_flagword);
 
     uint8_t f[max_flagword];
     memset(f, 0, max_flagword);

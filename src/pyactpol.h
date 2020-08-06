@@ -61,12 +61,12 @@ float moby2_stats_float_select(float *arr,
                                const size_t n,
                                const size_t k);
     
-inline float pyactpol_sselect(unsigned long k, unsigned long n, float *arr)
+static float pyactpol_sselect(unsigned long k, unsigned long n, float *arr)
 {
     return moby2_stats_float_select(arr, 1, n, k);
 }
 
-inline float compute_median(unsigned long n, float *arr)
+static float compute_median(unsigned long n, float *arr)
 {
     return moby2_stats_float_select(arr, 1, n, n/2);
 }
