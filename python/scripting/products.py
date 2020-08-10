@@ -40,12 +40,7 @@ def translate_array_name(array, instrument):
                                       "actpol2":"ar2",
                                       "actpol3":"ar3",
                                       "actpol4":"ar4",}[array]
-        if 'pa' in array:
-            return {"pa1":"ar1",
-                    "pa2":"ar2",
-                    "pa3":"ar3",
-                    "pa4":"ar4",}[array]
-        else: return array.lower()
+        return array.lower().replace("pa","ar")
     else:
         raise ValueError("Unknown instrument for array translation")
 
