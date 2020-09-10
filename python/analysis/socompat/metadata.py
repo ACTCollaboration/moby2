@@ -21,7 +21,7 @@ __all__ = [
 
 # Note some registration code runs on import; see bottom of source.
 
-class ActTodCal(metadata.simple.PerDetectorHdf5):
+class ActTodCal(metadata.PerDetectorHdf5):
     """ACT AbsCal are stored per-TOD, per-frequency band in HDF5 datasets.
 
     """
@@ -227,7 +227,7 @@ class ActPointOfsLoader(ActLoader):
     def from_loadspec(self, index_line):
         # The returned result is ResultSettish.  Expect at least one
         # entry.
-        rs = metadata.simple.PerDetectorHdf5.from_loadspec(
+        rs = metadata.PerDetectorHdf5.from_loadspec(
             index_line, detdb=self.detdb)
         if len(rs) == 0:
             raise RuntimeError('Failed to find any Pointing Offset info -- '
@@ -236,7 +236,7 @@ class ActPointOfsLoader(ActLoader):
 
 
 def register_loaders():
-    metadata.loader.REGISTRY.update({
+    core.metadata.loader.REGISTRY.update({
         'actpol_cuts': ActCutsLoader,
         'actpol_cal': ActCalLoader,
         'actpol_abscal': ActAbsCalLoader,
