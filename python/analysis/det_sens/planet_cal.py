@@ -191,10 +191,19 @@ class NeptuneHybrid(BrightnessFunction):
     def get_T_brightness(self, f_GHz):
         return self.b.get_T_brightness(f_GHz) * self.a.get_T_brightness(f_GHz)
 
+class JupiterSimple(BrightnessFunction):
+    def get_T_brightness(self, f_GHz):
+        # Rough wmap, only valid for LF array!!
+        p = [ 1.07794677, 111.55898163 ]
+        return np.polyval(p, f_GHz)
+
+
 def get_brightness_model(source_name, version=None):
     if source_name == 'uranus':
         return UranusHasselfield2013()
     if source_name == 'neptune':
         return NeptuneHybrid()
+    if source_name == 'jupiter':
+        return JupiterSimple()
     return None
 
