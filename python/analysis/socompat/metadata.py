@@ -21,18 +21,6 @@ __all__ = [
 
 # Note some registration code runs on import; see bottom of source.
 
-class ActTodCal(metadata.PerDetectorHdf5):
-    """ACT AbsCal are stored per-TOD, per-frequency band in HDF5 datasets.
-
-    """
-    @classmethod
-    def _prefilter_data(cls, data_in):
-        # Translations from ACT metadata names to new better names.
-        return super()._prefilter_data(data_in, key_map={
-            'tod_id': 'obs:obs_id',
-            'band_id': 'dets:band'})
-
-
 def get_abscal_proddb(filename, dataset):
     """Populate a ProdDb from the given HDF5 file, at the given dataset or
     group address.
@@ -211,11 +199,6 @@ class ActCalLoader(ActLoader):
         return load_act_cal(index_line['filename'])
 
 
-class ActAbsCalLoader(ActLoader):
-    def from_loadspec(self, index_line):
-        return ActTodCal.from_loadspec(index_line, detdb=self.detdb)
-
-
 class ActDetOfsLoader(ActLoader):
     def from_loadspec(self, index_line):
         return load_detoffsets_file(index_line['filename'],
@@ -227,12 +210,22 @@ class ActPointOfsLoader(ActLoader):
     def from_loadspec(self, index_line):
         # The returned result is ResultSettish.  Expect at least one
         # entry.
-        rs = metadata.PerDetectorHdf5.from_loadspec(
+        rs = metadata.ResultSetHdfLoader.from_loadspec(
             index_line, detdb=self.detdb)
         if len(rs) == 0:
             raise RuntimeError('Failed to find any Pointing Offset info -- '
                                f'request is: {index_line}')
         return rs
+
+
+class ActAbsCalLoader(metadata.ResultSetHdfLoader):
+    """ACT AbsCal are stored per-TOD, per-frequency band in HDF5 datasets.
+
+    """
+    def _prefilter_data(self, data_in):
+        return super()._prefilter_data(data_in, key_map={
+            'tod_id': 'obs:obs_id',
+            'band_id': 'dets:band'})
 
 
 def register_loaders():
