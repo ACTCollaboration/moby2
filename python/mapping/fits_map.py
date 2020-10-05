@@ -874,6 +874,15 @@ class fitsMap:
         hdu = fits.open(filename)
         self.fheader = hdu[0].header
         self.data = hdu[0].data
+        if self.data.ndim == 3:
+            # Work-around, for abscal runs on enki planet maps.
+            from pixell import enmap     # You might need pixell to load 3-d maps.
+            m = enmap.read_fits(filename)[0]
+            self.fheader = m.wcs.to_header()
+            self.data = np.array(m, dtype=dtype)
+            self._load_header()
+            return
+
         if dtype is not None:
             self.data = self.data.astype(dtype)
         self._load_header()

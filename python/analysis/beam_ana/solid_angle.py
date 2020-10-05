@@ -307,8 +307,10 @@ def driver(args):
     from argparse import ArgumentParser
     o = ArgumentParser()
     o.add_argument('param_file')
+    o.add_argument('map_name', nargs='*', help="Maps to purge (if --purge).")
     o.add_argument('-r', '--refit', action='store_true')
     o.add_argument('-u', '--update', action='store_true')
+    o.add_argument('--purge', action='store_true')
     args = o.parse_args(args)
 
     params = moby2.util.MobyDict.from_file(args.param_file)
@@ -345,6 +347,17 @@ def driver(args):
 
         logger('\n\nWriting results to %s' % ofile)
         odb.to_fits_table(ofile)
+
+    if args.purge:
+        # Remove specified outputs from the table.
+        data = moby2.util.StructDB.from_fits_table(ofile)
+        mask = np.ones(len(data), bool)
+        for m in args.map_name:
+            mask *= (data['name'] != m)
+        print('Keeping %i of %i ...' % (mask.sum(), len(mask)))
+        data = data[mask]
+        data.to_fits_table(ofile)
+        return
 
     # Summary operations.
     summary_ops = params.get_deep(('output', 'summaries'))
