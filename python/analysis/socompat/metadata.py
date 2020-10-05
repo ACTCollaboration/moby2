@@ -206,16 +206,8 @@ class ActDetOfsLoader(ActLoader):
                                     pa=index_line['dets:array_name'])
 
 
-class ActPointOfsLoader(ActLoader):
-    def from_loadspec(self, index_line):
-        # The returned result is ResultSettish.  Expect at least one
-        # entry.
-        rs = metadata.ResultSetHdfLoader.from_loadspec(
-            index_line, detdb=self.detdb)
-        if len(rs) == 0:
-            raise RuntimeError('Failed to find any Pointing Offset info -- '
-                               f'request is: {index_line}')
-        return rs
+class ActPointOfsLoader(metadata.ResultSetHdfLoader):
+    pass
 
 
 class ActAbsCalLoader(metadata.ResultSetHdfLoader):
