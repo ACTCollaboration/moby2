@@ -119,10 +119,12 @@ def process_map(B, F, params={}, freq=None, context=None):
 
     pl.subplot(211)
     pl.title(B)
-    pl.scatter(r[s2]*60., m.data[s2], s=1, alpha=.4)
+    _y = m.data[s2]
+    pl.scatter(r[s2]*60., _y, s=1, alpha=.4)
     z0 = peak_model(pX, np.arctan2(y, x), r[s00])
     pl.xlabel('Radius (arcmin)')
     pl.ylabel('Amplitude')
+    pl.ylim(_y.min(), _y.max())
     pl.subplot(212)
     pl.scatter(r[s00]*60., (z-z0)/pX[0], marker='x')
     pl.xlabel('Radius (arcmin)')
