@@ -53,6 +53,10 @@ def get_tod(params, aman=None):
               np.ones(data.dets.count) / tod.info.mce_filter.gain(),
               [(0, 'dets')])
 
+    # Describe the filter.
+    data.wrap('mce_filter_params',
+              np.array(tod.info.mce_filter.params))
+
     flags = core.AxisManager(axes['samps'])
     flags.wrap('enc_flags', tod.enc_flags, [(0, 'samps')])
     flags.wrap('pointing_mask', tod.pointing_mask, [(0, 'samps')])
