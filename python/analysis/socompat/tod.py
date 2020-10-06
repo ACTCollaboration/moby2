@@ -49,7 +49,9 @@ def get_tod(params, aman=None):
     del tod.data, tod.ctime
 
     # Include a cal to remove readout filter gain.
-    data.wrap('readout_filter_cal', np.ones(data.dets.count) / tod.info.mce_filter.gain())
+    data.wrap('readout_filter_cal',
+              np.ones(data.dets.count) / tod.info.mce_filter.gain(),
+              [(0, 'dets')])
 
     flags = core.AxisManager(axes['samps'])
     flags.wrap('enc_flags', tod.enc_flags, [(0, 'samps')])
