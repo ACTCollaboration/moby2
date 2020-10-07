@@ -53,9 +53,12 @@ def get_tod(params, aman=None):
               np.ones(data.dets.count) / tod.info.mce_filter.gain(),
               [(0, 'dets')])
 
-    # Describe the filter.
+    # Describe the filter -- this is already obsolete... use iir_params!
     data.wrap('mce_filter_params',
               np.array(tod.info.mce_filter.params))
+
+    iir_params = mce_to_iir(tod.info.mce_filter.params, tod.info.mce_filter.f_samp)
+    data.wrap('iir_params', iir_params)
 
     flags = core.AxisManager(axes['samps'])
     flags.wrap('enc_flags', tod.enc_flags, [(0, 'samps')])
@@ -88,6 +91,25 @@ def get_tod(params, aman=None):
         data = aman.merge(data)
 
     return (data, tod)
+
+
+def mce_to_iir(p, f_mux):
+    """Converts MCE filter params p and muxing frequency f_mux to an
+    iir_params block suitable for use with sotodlib
+    (tod_ops.filters.iir_filter).
+
+    Returns:
+      Array output with shape (3, n).  Polynomial coefficients are a =
+      output[0], b = output[1], and fscale = output[2][0].
+
+    """
+    K = 1./2**14
+    scalars = [K, K, K, K, 1., 1.]
+    b11, b12, b21, b22, k1, k2 = [s*p for s,p in zip(scalars, p)]
+    a = np.array([1., - b11 - b21, b11*b21 + b12 + b22, - b11 * b22 - b21 * b12, b12*b22])
+    b = np.array([1., 4, 6, 4, 1]) / 2**(k1+k2)
+    fscale = b*0 + 1./f_mux
+    return np.array([a, b, fscale])
 
 
 def actpol_load_observation(db, obs_id, dets=None, prefix=None):
