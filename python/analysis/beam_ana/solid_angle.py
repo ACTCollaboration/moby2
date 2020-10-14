@@ -332,12 +332,14 @@ def driver(args):
     if not os.path.exists(ofile):
         args.refit = True
 
-    if args.refit:
+    if args.refit or args.update:
         # Get map list.
         basenames, filenames = util.get_map_list(params['source_maps'])
 
         rows = []
         for B,F in zip(basenames, filenames):
+            if (not args.refit) and (B not in args.map_name):
+                continue
             row = process_map(B, F, params['analysis'],
                               context=context)
             rows.append(row)
@@ -346,6 +348,14 @@ def driver(args):
         header = list(zip(*rows[0]))[0]
         columns = list(map(np.array, list(zip(*[list(zip(*row))[1] for row in rows]))))
         odb = moby2.util.StructDB.from_data(list(zip(header, columns)))
+
+        # Merge into existing?
+        if not args.refit:
+            idb = moby2.util.StructDB.from_fits_table(ofile)
+            for r in odb:
+                idx = list(idb['name']).index(r['name'])
+                idb[idx] = r
+            odb = idb
 
         logger('\n\nWriting results to %s' % ofile)
         odb.to_fits_table(ofile)
