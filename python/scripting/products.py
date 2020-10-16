@@ -22,7 +22,7 @@ import warnings
 import moby2
 import moby2.mapping.fits_map as fits_map
 import moby2.instruments as instrument
-from moby2.util import mce
+from moby2.util import mce, HDFArchive
 
 DEFAULT_INSTRUMENT = 'unknown'
 shared_libraries = {"actpol":"actpol_shared", "mbac":"act_shared"}
@@ -1112,7 +1112,7 @@ def get_pertod_calibration_hdf(params, tod_id=None):
     dataset_name = params.get('dataset', 'abscal')
     hf = h5py.File(filename, 'r')
     data = np.asarray(hf[dataset_name])
-    s = (data['tod_id'] == tod_id)
+    s = (data['tod_id'] == HDFArchive.encode_23(tod_id))
     idx = s.nonzero()[0]
     cal = moby2.Calibration(det_uid=adata['det_uid'])
     cal.cal[:] = 0.
@@ -1120,7 +1120,7 @@ def get_pertod_calibration_hdf(params, tod_id=None):
         row = data[i]
         s = np.ones(len(cal.cal), bool)
         if 'band_id' in data.dtype.names:
-            s = s * (row['band_id'] == fcode)
+            s = s * (HDFArchive.decode_23(row['band_id']) == fcode)
             cal.cal[s] = row['cal']
     return cal
 
