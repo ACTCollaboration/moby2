@@ -110,17 +110,18 @@ def make_obsdb(cat=None):
     obsdb.add_obs_columns([
         'timestamp float',
         'pa string',
+        'scode string',
         'obs_type string',
         'obs_detail string',
     ])
     for i in cat['tod_name'].argsort():
         tags = []
         row = cat[i]
-        obs_id = row['tod_id']
+        obs_id = row['tod_name']
         data = {
             'timestamp': float(row['ctime'])
         }
-        data.update({k: row[k] for k in ['pa', 'obs_type', 'obs_detail']})
+        data.update({k: row[k] for k in ['pa', 'obs_type', 'obs_detail', 'scode']})
         if row['obs_type'] == 'planet':
             tags.extend(['planet', row['obs_detail']])
         obsdb.update_obs(obs_id, data=data, tags=tags, commit=False)
@@ -153,7 +154,7 @@ def make_obsfiledb(cat=None, filebase=None, detdb=None, db_in=None,
     if filebase is None:
         filebase = moby2.scripting.get_filebase()
     for row in cat:
-        obs_id = row['tod_id']
+        obs_id = row['tod_name']
         if obs_id in ignore:
             continue
         f = filebase.get_full_path(obs_id)
