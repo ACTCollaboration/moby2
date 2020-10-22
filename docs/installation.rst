@@ -1,6 +1,9 @@
 Installation
 ============
 
+Overview
+--------
+
 When moby2 is properly installed and configured, the following should
 run without error:
 
@@ -11,9 +14,6 @@ run without error:
 moby2 depends on a bunch of different packages that are needed to
 support high-precision pointing and weird file i/o.
 
-Setup scripts
--------------
-
 The steps are:
 
 * Setup environment
@@ -22,6 +22,13 @@ The steps are:
 * Install moby2 dependencies
 * Install moby2
 * Point to a working .moby2
+
+You might need to check out the following repositories:
+
+* `libactpol\_deps`_
+* `libactpol`_
+* `moby2`_
+
 
 Environment variables
 ---------------------
@@ -81,13 +88,6 @@ look like this::
   prepend-path            PYTHONPATH      $mroot/lib/$pystr/site-packages
 
 
-libactpol dependencies
-----------------------
-
-As of mid-2018, all dependencies are either easily obtained through
-system package managers or pip, or are stored in an ACTCollaboration
-github repository.
-
 libactpol dependencies: easily obtained packages
 ------------------------------------------------
 
@@ -112,7 +112,7 @@ libactpol dependencies: special modules
 There are three rather specialized packages required by libactpol:
 libslim (compression), sofa (astrometric conversions), slarefro
 (refraction).  These are most easily obtained through the
-libactpol_deps repository.
+`libactpol\_deps`_ repository.
 
 You can access the repository by cloning::
 
@@ -122,7 +122,10 @@ This repository contains 3 installable modules.  **See the README file
 for the latest instructions.**
 
 **libslim**: In order to support uint8, we may be using a patched
-version of libslim.  This may become unneccessary in the future.
+version of libslim.  This may become unneccessary in the future.  (If
+loading TODs throws an error message like "terminate called after
+throwing an instance of 'bad_output_file'", then this is probably
+ebcause libslim was compiled without libzzip support.)
 
 **sofa**: This is the Standards of Fundamental Astronomy library from
 the IAU, http://www.iausofa.org/ .  At this writing, we use a recent
@@ -137,10 +140,11 @@ Once all three of these packages have been installed, it should be
 possible to compile libactpol.
 
 
-Build patched libactpol
------------------------
+libactpol
+---------
 
-You can access the repository by cloning::
+To build `libactpol`_ (a library written in C), start by checking out
+the repository::
 
   git clone ssh://git@github.com/ACTCollaboration/libactpol.git
   cd libactpol.git
@@ -158,8 +162,8 @@ Then proceed with::
   make install
 
 
-Get moby2 dependencies
-----------------------
+moby2 dependencies
+------------------
 
 The -dev packages are needed for compiling and linking the C
 extensions. The Python stuff is only needed at run time.  The moby2
@@ -183,7 +187,8 @@ Depending on your system and the Python version, you will need these
 			  python3-mysqldb \
                           python3-setuptools
 
-or these (Python 2)::
+or possibly these (Python 2)::
+
                           python-dev \
                           python-tz \
                           python-numpy \
@@ -212,19 +217,12 @@ If you have to compile your own pyephem, do it like this:
 
 
 
-Get moby2
----------
+moby2
+-----
 
-Use git to clone the moby2 repository.  Our main copy is a public
-repo on github.com:
-
-.. code-block:: shell
+Use git to clone the `moby2`_ repository::
 
   git clone ssh://git@github.com/ACTCollaboration/moby2.git moby2
-
-
-Compile and install moby2
--------------------------
 
 In the moby2 source directory, you can use ``setup.py`` in the usual
 way to build and install moby2.  I.e.::
@@ -256,3 +254,7 @@ Test the installation with: ``python -c 'import moby2'`` or similar.
 You will probably need to direct the system to a valid ``.moby2``
 file.  Define the environment variable DOT_MOBY2 to point to that
 file, or just put something valid in ~/.moby2.
+
+.. _libactpol\_deps: https://github.com/ACTCollaboration/libactpol_deps/
+.. _libactpol: https://github.com/ACTCollaboration/libactpol/
+.. _moby2: https://github.com/ACTCollaboration/moby2/
