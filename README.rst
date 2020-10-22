@@ -7,3 +7,6 @@ most moby2 modules support Python 2 and Python 3.
 
 For the latest on moby2, visit
 https://github.com/ACTCollaboration/moby2.
+
+For documentation, please see
+https://phy-act1.princeton.edu/public/software/moby2/.
