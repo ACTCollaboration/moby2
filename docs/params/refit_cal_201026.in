@@ -1,0 +1,85 @@
+# -*- mode:python -*-
+#
+# input file for moby2 refit_planet_cal and write_abscal
+
+## "tag" - determines the output filename.
+tag = '201026'
+
+## source directory with applicable planet_cal output files
+## (pa5_s18_f150_accepted.txt and so on).  If you have multiple such
+## directories, link all the usable files into a single target.
+data_src = './refit_cal_201026/inputs/'
+
+## Prefix for plots.
+plot_prefix = 'refit_cal_201026/{pa}_'
+
+## Instructions for recalibrating... see source.  But basically you
+## can load correction factors from one or more HDF5 datasets.
+recal_instructions = [
+]
+
+## Entries (tod ids) to suppress when writing the AbsCal.  This was
+## needed for that one bizarre TOD in, like, s15 or something.
+blacklist = [
+]
+
+# cal_configs - Instructions for combining data, fitting model, and
+# setting domains of applicability.
+#
+# Each entry in the list describes a single fit and has the
+# following form:
+#
+#   (label,  pa,  fcode,  omega_in,  [dataset, ...])
+#
+# Each dataset entry has the following form:
+#
+#   (scode, omega, loading_cut, t_lo, t_hi)
+#
+# All datasets in a single fit entry will be fit simultaneously, with
+# a single slope vs. loading but individual amplitudes.  The data will
+# be read from the corresponding "accepted.txt" file, but only the
+# data in the range (t_lo, t_hi) will be used in the fitting and the
+# output model will be restricted to apply only to that time range.
+#
+# The omega_in and omega columns can be used to apply per-dataset
+# calibration corrections.  The input data are scaled to:
+#
+#      C_used = C_in * (omega / omega_in)
+#
+# One use for these parameters is to convert from some single assumed
+# solid angle used in fit_planet_cal to a per-dataset solid angle
+# learned in subsequent processing.  The sign of this is right,
+# assuming C is a calibration factor in pW / K, because omega >
+# omega_in means we under-estimated the flux based on peak height by
+# assuming omega_in.
+#
+# Another application is to remove the MCE filter gain, if it ended up
+# being included in the planet amplitudes.  In that case put the
+# filter gain in the omega_in position.
+
+cal_configs = [
+    # Each block below will fit a common slope (but different amps)
+    # for s17, s18, and s19.  Remember the first entry here is just a
+    # label for the plot.
+
+    ('s17-s19', 'pa4', 'f150',    766.503, [('s17',   1./1., 3.5,          0, 2000000000),
+                                            ('s18',   1./1., 3.5,          0, 2000000000),
+                                            ('s19',   1./1., 3.5,          0, 2000000000)]),
+    ('s17-s19', 'pa4', 'f220',    766.503, [('s17',   1./1., 3.5,          0, 2000000000),
+                                            ('s18',   1./1., 3.5,          0, 2000000000),
+                                            ('s19',   1./1., 3.5,          0, 2000000000)]),
+    ('s17-s19', 'pa5', 'f090',    766.503, [('s17',   1./1., 3.5,          0, 2000000000),
+                                            ('s18',   1./1., 3.5,          0, 2000000000),
+                                            ('s19',   1./1., 3.5,          0, 2000000000)]),
+    ('s17-s19', 'pa5', 'f150',    766.503, [('s17',   1./1., 3.5,          0, 2000000000),
+                                            ('s18',   1./1., 3.5,          0, 2000000000),
+                                            ('s19',   1./1., 3.5,          0, 2000000000)]),
+    ('s17-s19', 'pa6', 'f090',    766.503, [('s17',   1./1., 3.5,          0, 2000000000),
+                                            ('s18',   1./1., 3.5,          0, 2000000000),
+                                            ('s19',   1./1., 3.5,          0, 2000000000)]),
+    ('s17-s19', 'pa6', 'f150',    766.503, [('s17',   1./1., 3.5,          0, 2000000000),
+                                            ('s18',   1./1., 3.5,          0, 2000000000),
+                                            ('s19',   1./1., 3.5,          0, 2000000000)]),
+]
+
+

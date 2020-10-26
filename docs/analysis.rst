@@ -18,3 +18,4 @@ Module list:
   det_sens
   get_solid_angle
   fit_planet_cal
+  refit_planet_cal
