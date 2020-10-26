@@ -7,16 +7,13 @@
 This script is for realigning a detector offset file, iterating
 against planetMaps.
 
-For a starting point, see configuration example: 
-:download:`fp_realign.in <params/fp_realign.cfg>`.
+An example configuration file is here:
+:download:`fp_realign.cfg<params/fp_realign.cfg>`.
 
-The main groups in the configuration file are:
+See the docstring for ``main()``, below, for the invocation patterns.
 
 
 Reference
 =========
 
-Selected methods from beam_ana.solid_angle
-''''''''''''''''''''''''''''''''''''''''''
-
-.. autofunction:: moby2.analysis.fp_fit.realign.fp_realign
+.. autofunction:: moby2.analysis.fp_fit.realign.main

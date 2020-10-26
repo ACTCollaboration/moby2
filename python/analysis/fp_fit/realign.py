@@ -34,21 +34,21 @@ def main(args_in):
 
 
     Write the start-point offsets.  (If you know your planet map has the
-    signal at position (x,y), then set the offset to (-x, -y)):
+    signal at position (x,y), then set the offset to (-x, -y))::
 
       # set shifts for stage 0 to (0,0)
       moby2 fp_realign set-shifts 0 0 0
 
-    Do a trial map (stage 0):
+    Do a trial map (stage 0)::
 
       moby2 fp_realign map 0 --trial
 
-    Measure peak position in stage 0 maps:
+    Measure peak position in stage 0 maps::
 
       moby2 fp_realign measure 0
 
     If you are satisfied with that, then great.  If not, update the
-    (local) shifts database so as to eliminate the offset:
+    (local) shifts database so as to eliminate the offset::
 
       moby2 fp_realign measure 0 --set-next-shift --target 0 0
 
@@ -56,17 +56,18 @@ def main(args_in):
     map... sometimes 0,0 makes sense but sometimes you might want it to
     appear at the same position as it used to / as it does in other arrays.
 
-    After "set-next-shift", you can run maps for the next stage to verify it worked:
+    After "set-next-shift", you can run maps for the next stage to
+    verify it worked::
 
       moby2 fp_realign map 1 --trial
       moby2 fp_realign measure 1
 
     If satisfied, redo everything without --trial.  To clear the local
-    shifts database, run
+    shifts database, run::
 
       moby2 fp_realign reset-shifts 0
 
-    When happy with the maps, write the final shifted template:
+    When happy with the maps, write the final shifted template::
 
       moby2 fp_realign write_template 1 template_out.txt
 
