@@ -1,6 +1,6 @@
 # -*- mode:python -*-
 #
-# input file for moby2 refit_planet_cal and write_abscal
+# input file for moby2 refit_planet_cal
 
 ## "tag" - determines the output filename.
 tag = '201026'

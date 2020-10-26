@@ -10,8 +10,9 @@ the average relative optical couplings (proportional to uK / pW) for
 the detectors in an array.
 
 The code also allows the user to identify a subset of the detectors as
-"fiducial", meaning that theire relative optical calibration seems to
-be stable enough to use for calibration purposes.
+"fiducial", meaning that their relative optical calibration seems to
+be stable enough to act as an anchor for absolute calibration
+purposes.
 
 
 Running an analysis
@@ -20,20 +21,24 @@ Running an analysis
 First pass
 ----------
 
-Use a configuration file like this one:
-
+Use a configuration file like the example, here:
 ::download:`get_fiducial.in <params/get_fiducial.in>`.
 
 Before running the code, update at least these settings:
 
-- 'fpfit_reduced': The pattern for the path to reduced fp_fit results
-  for each observation; for example.
-  '../200423/fp_output1/reduced/{tod_id}_fp.fits'
-- 'tod_list': The path to an ascii file listing the observations you
-  want to include (with tod_id in the first column).
+``fpfit_reduced``
+    The pattern for the path to reduced fp_fit results for each
+    observation; for example:
+    ``'../200423/fp_output1/reduced/{tod_id}_fp.fits'``
+
+``tod_list``
+    The path to an ascii file listing the observations you want to
+    include (with tod_id in the first column).
 
 We will update the cut parameters after looking at the preliminary
-output.  So go ahead and run::
+output.  So go ahead and run:
+
+.. code-block:: bash
 
   mkdir depot
   moby2 get_fiducial get_fiducial.in

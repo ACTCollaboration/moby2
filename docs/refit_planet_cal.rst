@@ -18,7 +18,7 @@ Running the code
 After setting up the configuration file (see below), run:
 
 .. code-block:: bash
-  
+
   moby2 refit_planet_cal fit_planet_cal.in
 
 This will call the driver program in
@@ -26,7 +26,9 @@ This will call the driver program in
 
 Running that will produce plots and a calibration model file, of the
 form ``models_<tag>_cand.fits``.  When the model is acceptable, rename
-to ``models_<tag>.fits`` and run::
+to ``models_<tag>.fits`` and run:
+
+.. code-block:: bash
 
   moby2 refit_planet_cal fit_planet_cal.in --write-abscal
 
@@ -36,3 +38,6 @@ Configuration options
 =====================
 
 Configuration options are described in the example config file, 
+:download:`refit_planet_cal.in <params/refit_planet_cal.in>`.
+
+
