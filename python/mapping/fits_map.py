@@ -879,6 +879,7 @@ class fitsMap:
             from pixell import enmap     # You might need pixell to load 3-d maps.
             m = enmap.read_fits(filename)[0]
             self.fheader = m.wcs.to_header()
+            self.fheader['NAXIS2'], self.fheader['NAXIS1'] = m.data.shape
             self.data = np.array(m, dtype=dtype)
             self._load_header()
             return
@@ -998,7 +999,7 @@ class fitsMap:
         return {'extent': self._to_units([x1, x2, y1, y2], units=units)}
 
     def imshow(self, data=None, units=None, sig='amp', sigma=None,
-               coords=None, quiet=False, **args):
+               coords=None, quiet=False, ax=None, **args):
         import pylab
         err, msg = self._checkRegularity()
         if err > 0 and not quiet:
@@ -1021,8 +1022,10 @@ class fitsMap:
             args['aspect'] = self._meanAspect()
         if 'interpolation' not in args:
             args['interpolation'] = 'nearest'
-            
-        return pylab.imshow(d, origin='lower', **args)
+        if ax is None:
+            return pylab.imshow(d, origin='lower', **args)
+        else:
+            return ax.imshow(d, origin='lower', **args)
 
     def contour(self, levels, data=None, units=None,
                 coords=None, quiet=False, **args):
@@ -1235,7 +1238,16 @@ class spaceMap(fitsMap):
         if clf:
             pl.clf()
         
-            
+    @classmethod
+    def from_enmap(cls, emap):
+        from pixell import enmap
+        assert(emap.ndim == 2)   # sry, kill those dims for me.
+        self = cls()
+        self.fheader = emap.wcs.to_header()
+        self.fheader['NAXIS2'], self.fheader['NAXIS1'] = emap.data.shape
+        self.data = np.array(emap)
+        self._load_header()
+        return self
 
 
 class freqMap(fitsMap):
