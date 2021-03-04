@@ -191,9 +191,14 @@ def do_cal_job(cfg, job_name, catalogs=None):
         'T_SOURCE': get_source_temperature(cfg['source'], info_dict),
         'OMEGA_BEAM': get_beam_solid_angle(cfg['beam'], info_dict),
         }
-    planet_solids = planet_cal.get_planet_solid_angle(
-        'uranus', cat_dict['ctime'])
-    T_DILUTED = (job_data['T_SOURCE'] * planet_solids /
+
+    if 'solid_angle' in cfg['source']:
+        job_data['OMEGA_SOURCE'] = 0*cat_dict['ctime'] + cfg['source']['solid_angle']
+    else:
+        job_data['OMEGA_SOURCE'] = planet_cal.get_planet_solid_angle(
+            cfg['source']['type'], cat_dict['ctime'])
+
+    T_DILUTED = (job_data['T_SOURCE'] * job_data['OMEGA_SOURCE'] /
                  job_data['OMEGA_BEAM'])
     # Naive conversions
     cals = amp / T_DILUTED
