@@ -129,8 +129,14 @@ def write_abscal(cal_cfg, model_files=[]):
                  (row['t_lo'] <= cat['ctime']) *
                  (cat['ctime'] < row['t_hi']))
             x = cat[s]['loading']
-            print('  Patching %i of %i that have loading=-1.' % ((x<0).sum(), len(x)))
-            x[x<0] = 1.5  # dummy fill in.
+            patch_load = cal_cfg.get('patch_bad_loading', 1.5)
+            if patch_load is None or patch_load < 0:
+                print('  Dropping %i of %i that have loading < 0.' % ((x<0).sum(), len(x)))
+                s *= (cat['loading'] >= 0)
+                x = cat[s]['loading']
+            else:
+                print('  Patching %i of %i that have loading < 0.' % ((x<0).sum(), len(x)))
+                x[x<0] = patch_load
             y = np.exp(-(row['b'] + row['m'] * x))
             for rdb_type, rdb in recals:
                 tfcodes = np.array(['%s_%s' % (t, row['fcode'])
