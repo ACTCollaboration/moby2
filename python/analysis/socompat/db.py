@@ -67,7 +67,7 @@ def make_detdb():
         adata = moby2.scripting.products.get_array_data_new(
             {'array': pa, 'season': scode})
         base_map = [
-            (k, k) for k in ['optical_sign', 'det_type', 'pol_family']
+            (k, k) for k in ['optical_sign', 'det_type', 'wafer', 'pol_family']
         ]
         other_maps = [
             ('mce', [
