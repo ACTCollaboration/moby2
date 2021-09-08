@@ -197,6 +197,28 @@ class JupiterSimple(BrightnessFunction):
         p = [ 1.07794677, 111.55898163 ]
         return np.polyval(p, f_GHz)
 
+class JupiterSimple(BrightnessFunction):
+    def get_T_brightness(self, f_GHz):
+        # Rough wmap, only valid for LF array!!
+        p = [ 1.07794677, 111.55898163 ]
+        return np.polyval(p, f_GHz)
+
+class JupiterPlanck2013(BrightnessFunction):
+    """This is the expression from "Planck 2013 results V - LFI
+    calibration".  Note the caption says 187.8K - 4.5 K cm^-1 lambda,
+    but the plot has a slope of -4.5 K mm^-1 so the caption must be a
+    typo.
+
+    This is only shown from 100 down to 25 GHz.  The WMAP point at 90
+    GHz is substantially above the line so we probably need something
+    different outside of the LF bands.
+
+    """
+    def get_T_brightness(self, f_GHz):
+        lamb = BB.c / f_GHz * (1e-9*1e3)  # in mm
+        T_RJ = np.polyval([-4.5, 187.8], lamb)
+        return BB.RJToBlackbody(T_RJ, f_GHz)
+
 
 def get_brightness_model(source_name, version=None):
     if source_name == 'uranus':
@@ -204,6 +226,5 @@ def get_brightness_model(source_name, version=None):
     if source_name == 'neptune':
         return NeptuneHybrid()
     if source_name == 'jupiter':
-        return JupiterSimple()
+        return JupiterPlanck2013()
     return None
-
