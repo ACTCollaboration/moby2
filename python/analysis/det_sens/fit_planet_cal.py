@@ -76,7 +76,7 @@ def load_amplitudes(params, info_dict):
     """Read planet peak heights from some kind of file.  The ``info_dict``
     will be used to format the filename according to what data subset
     is being analyzed.  The ``params`` argument is a dict that looks
-    like one of these:
+    like one of these::
 
       {'type': 'quick_pick',
        'filename': 'quick_beam.pik',

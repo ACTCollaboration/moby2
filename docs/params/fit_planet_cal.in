@@ -1,0 +1,148 @@
+# -*- mode: python -*-
+#
+# Example config file for moby2 ``fit_planet_cal``.
+#
+# A single config file can describe several "jobs", which typically
+# correspond to datasets (array, band, season, source).
+#
+# The 'defaults' block provides settings that are inherited by all
+# jobs.  The settings at root level of 'defaults' can be overridden in
+# the job definition blocks.
+#
+
+fit_opacity = {
+    'defaults': {
+        ## Filename prefix for plots and reduced data.
+        'output_prefix': 'planet_cal/{job}_',
+
+        ## The 'source' specification is needed to find the correct
+        ## temperature model.
+        'source': {'type': 'uranus'},
+
+        # Specify where to get the peak heights from.  This has a long
+        # history by get_solid_angle is the preferred approach, these
+        # days, because it estimates average solid angle and a full
+        # set of peak heights.
+        'amplitudes': {
+            ## From get_solid_angle output:
+            'type': 'get_solid_angle',
+            'filename': 'solid_angle/table.fits',
+            ## Or for quickbeam:
+            #'filename': './quick_fits0.pik',
+            #'masks': [('gaussian', 'ok')],
+            #'field': ('gaussian', 'amp'),
+            #'field': ('peak', 'amp'),
+            #'also_load': [('gaussian', 'fwhm_a'),
+            #              ('gaussian', 'fwhm_b'),
+            #          ],
+            ## Or for custom ascii:
+            # 'type': 'column_file',
+            # 'filename': ..., 'columns': [0,1]
+        },
+
+        ## The default moby2 obs_catalog will be used unless an
+        ## alternative is specified here.
+        'info_catalog': None,
+
+        ## The beam information needs to be specified in each job.
+        'beam': {'type': 'constant',
+                 'solid_angle_sr': 1e-6,
+             },
+    },
+
+    ## Each entry in the jobs list is of form (label, settings_dict).
+    ## The label is just a string for plots and filenames and will not be decoded.
+    ##
+    ## In the "include" and "cuts" blocks, three kinds of matching can
+    ## be performed (see moby2.scripting.get_selection):
+    ##
+    ##   (key, <list>)   -- the value must match an item from list exactly.
+    ##   (key, (lo, hi)) -- the value must satisfy lo <= value < hi.
+    ##   (key, (lo, hi, modulus))
+    ##                   -- the value must satisfy lo <= value + n * (hi-lo) < hi,
+    ##                      for some integer n.  This is used for periodic
+    ##                      quantities to specify the branch.
+
+    'jobs': [
+        ('pa7_s20_f030', {
+
+            ## The "include" block is a list of selection criteria.
+            ## Observations not matching the specifications here will
+            ## be entirely excluded from the analysis (they won't show
+            ## up on plots or listed in "accepted"/"rejected" files.
+            'include': [
+                ('scode', ['s20']),
+                ('pa', ['pa7']),
+                ('loading', (0,5)),
+                ('hwp_epoch', ['none']),
+                #('ctime', (1494639000, 1516386865)),
+                #('hour_utc', (-1,11,24)),
+                #('amp', (1e-9,1e9)),
+            ],
+
+            ## The "cuts" block is a list of selection criteria.
+            ## Observatios not matching the specs here will be cut
+            ## from the model fits.  The amplitudes will be shown on
+            ## the plots as Xs instead of dots.
+            ##
+            ## In this example, the only thing we "cut" rather than
+            ## exclude entirely is the daytime observations.  This is
+            ## so that the plot shows us the extent to which daytime
+            ## planets fail to meet the beam quality of the nighttime
+            ## data.
+            'cuts': [
+                ('hour_utc', (-1,11,24)),
+                #('ctime', (1494639000, 1512400000)),
+                #('amp', (.01,1.)), # cuts 1 outlier.
+                #('loading', (0,2.0)),
+                #('fwhm_a', (.005,.05)),
+            ],
+
+            ## The "info" block is used for two things... 'freq_code'
+            ## is usually necessary, for the code to select only a
+            ## particular frequency band's results from the
+            ## amplitudes.  Any items here may be passed to filename /
+            ## plot label string formatting codes.  See code...
+            'info': {'freq_code': 'f030'},
+
+            ## Specify the source type and the frequency at which its
+            ## brightness should be evaulated.
+            'source': {'type': 'jupiter',
+                       'frequency_GHz': 27.0},
+
+            ## Specify the beam solid angle.
+            'beam': {'type': 'constant',
+                     'solid_angle_sr': 5580e-9},
+
+            
+        }),
+
+        ('pa7_s20_f040', {
+            ## This is similar to the previous job but with values for
+            ## the other band.
+
+            'include': [
+                ('scode', ['s20']),
+                ('pa', ['pa7']),
+                ('loading', (0,5)),
+                ('hwp_epoch', ['none']),
+                #('ctime', (1494639000, 1516386865)),
+                #('hour_utc', (-1,11,24)),
+                #('amp', (1e-9,1e9)),
+            ],
+            'cuts': [
+                ('hour_utc', (-1,11,24)),
+                #('ctime', (1494639000, 1512400000)),
+                #('amp', (.01,1.)), # cuts 1 outlier.
+                #('loading', (0,2.0)),
+                #('fwhm_a', (.005,.05)),
+            ],
+            'info': {'freq_code': 'f040'},
+            'source': {'type': 'jupiter',
+                       'frequency_GHz': 39.0},
+            'beam': {'type': 'constant',
+                     'solid_angle_sr': 2855e-9},
+        }),
+    ],
+}
+

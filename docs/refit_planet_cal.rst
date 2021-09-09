@@ -40,4 +40,7 @@ Configuration options
 Configuration options are described in the example config file, 
 :download:`refit_planet_cal.in <params/refit_planet_cal.in>`.
 
+Auto-doc
+========
 
+.. autofunction:: moby2.analysis.det_sens.refit_planet_cal.main
