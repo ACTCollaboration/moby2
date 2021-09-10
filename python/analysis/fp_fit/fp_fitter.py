@@ -488,7 +488,7 @@ class FPModelFitter(FPScriptable):
     def plot_model(self, beam, filt_opts, x, y, z=None, sample_time=None, 
                    filename=None, title_text=None):
         z_model = self(beam, filt_opts, x, y, None)
-        fig = plt.figure()
+        fig = plt.gcf()
 
         tscale = sample_time
         tunit = 'seconds'
