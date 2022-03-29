@@ -39,11 +39,15 @@ def get_tod(params, aman=None):
         'dets':
         core.LabelAxis('dets', ['%s_%04i' % (pa, d) for d in tod.det_uid]),
         'samps':
-        core.OffsetAxis('samps', count, 0, tod.info.basename),
+        core.OffsetAxis('samps', count, params.get('start', 0),
+                        tod.info.basename),
     }
 
     data = core.AxisManager(axes['dets'], axes['samps'])
-    data.wrap('signal', tod.data, [(0, 'dets'), (1, 'samps')])
+    if params.get('read_data', True):
+        data.wrap('signal', tod.data, [(0, 'dets'), (1, 'samps')])
+    else:
+        data.wrap('signal', None)
     data.wrap('timestamps', tod.ctime, [(0, 'samps')])
 
     del tod.data, tod.ctime
@@ -112,9 +116,13 @@ def mce_to_iir(p, f_mux):
     return np.array([a, b, fscale])
 
 
-def actpol_load_observation(db, obs_id, dets=None, prefix=None):
+def actpol_load_observation(db, obs_id, dets=None, samples=None,
+                            no_signal=None, prefix=None, **kwargs):
     """Load observation -- keep this compatible with sotodlib.Context
     get_obs interface."""
+    if len({k: v for k, v in kwargs.items() if v is not None}):
+        raise RuntimeError(f'This function does not understand args: {kwargs}')
+
     aman = None
     if dets is not None:
         # Then it is a list of dets.  Restrict the list to only things
@@ -132,12 +140,21 @@ def actpol_load_observation(db, obs_id, dets=None, prefix=None):
     if prefix is None:
         prefix = ''
 
+    start, end = 0, None
+    if samples is not None:
+        start, end = samples
+
     # Use the db to get the filename.
     files_by_detset = db.get_files(obs_id, prefix=prefix)
     assert(len(files_by_detset) == 1)
     for detset, fileidx in files_by_detset.items():
         assert(len(fileidx) == 1)
         filename, sample_start, sample_stop = fileidx[0]
-        aman, tod = get_tod({'filename': filename}, aman=aman)
+        aman, tod = get_tod({'filename': filename,
+                             'repair_pointing': True,
+                             'read_data': (no_signal is not True),
+                             'start': start,
+                             'end': end}, aman=aman)
+
     return aman
 
