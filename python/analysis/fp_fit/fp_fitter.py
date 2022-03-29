@@ -488,7 +488,7 @@ class FPModelFitter(FPScriptable):
     def plot_model(self, beam, filt_opts, x, y, z=None, sample_time=None, 
                    filename=None, title_text=None):
         z_model = self(beam, filt_opts, x, y, None)
-        fig = plt.figure()
+        fig = plt.gcf()
 
         tscale = sample_time
         tunit = 'seconds'
@@ -499,6 +499,10 @@ class FPModelFitter(FPScriptable):
         t = tscale*np.arange(len(x))
         gg, bb = z, z_model
 
+        arcmin_lims = self.opts.get('arcmin_lims', (2., 1.))
+        XLIM = (-arcmin_lims[0], arcmin_lims[0])
+        XMUL = arcmin_lims[1]
+
         plt.subplot(221)
         plt.plot(t, gg, 'k')
         plt.plot(t, bb, 'b')
@@ -508,13 +512,13 @@ class FPModelFitter(FPScriptable):
         plt.subplot(222)
         plt.plot(x, gg, 'k')
         plt.plot(x, bb, 'b')
-        plt.xlim(-2.,2.)
-        plt.gca().xaxis.set_major_locator(plt.MultipleLocator(1.))
+        plt.xlim(*XLIM)
+        plt.gca().xaxis.set_major_locator(plt.MultipleLocator(XMUL))
         plt.subplot(224)
         plt.plot(x, gg-bb, 'r')
         plt.xlabel('X (%s)'%unit)
-        plt.gca().xaxis.set_major_locator(plt.MultipleLocator(1.))
-        plt.xlim(-2.,2.)
+        plt.xlim(*XLIM)
+        plt.gca().xaxis.set_major_locator(plt.MultipleLocator(XMUL))
 
         if title_text != None:
             plt.figtext(0.5, 0.94, title_text, ha='center', va='bottom')

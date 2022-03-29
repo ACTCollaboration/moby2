@@ -150,7 +150,7 @@ for tod_i, tod_file in enumerate(tod_files):
     tod_info = moby2.scripting.get_tod_info({'filename':tod_file})
     # Tell the output filer about that...
     outputm.data.update(tod_info.get_dict())
-    outputm.data.update({'tod_i': tod_i})
+    outputm.data.update({'tod_i': tod_i, 'first_five': tod_info.name[:5]})
 
     # Save these parameters (once per TOD just in case)
     par_out = params.get_deep(('output', 'params'), 'planetCuts.par')

@@ -3,6 +3,7 @@ from __future__ import absolute_import
 from past.builtins import basestring
 import moby2
 import numpy as np
+import os
 
 class TimeConstantTransfer:
     def __init__(self, time_constants):
@@ -321,8 +322,14 @@ class TODSpectrum:
 
     @classmethod
     def from_file(cls, filename):
-        data = np.load(filename)
-        self = cls(data['freq'], data['spec'], **data['meta'].tolist())
+        data = None
+        try:
+            data = np.load(filename)
+            meta = data['meta'].tolist()
+        except:
+            data = np.load(filename, encoding='bytes')
+            meta = {k.decode('ascii'): v for k, v in data['meta'].tolist().items()}
+        self = cls(data['freq'], data['spec'], **meta)
         return self
         
  
@@ -330,23 +337,59 @@ def get_tod_spec_main(args):
     from optparse import OptionParser
     o = OptionParser()
     o.add_option('-i', '--interactive-debugger', action='store_true')
+    o.add_option('--no-plots', action='store_true')
+    o.add_option('--force', default=False, action='store_true')
+    o.add_option('--intolerant', action='store_true')
+
     opts, args = o.parse_args(args)
 
     if opts.interactive_debugger:
         moby2.util.debugger.interactive(True)
 
-    cfg_filename, tod_basename = args
+    cfg_filename, args = args[0], args[1:]
+    config = moby2.util.MobyDict.from_file(cfg_filename)
+    
+    tod_list = moby2.scripting.get_tod_list(config['get_spec']['tod_list'],
+                                            cmdline_args=args)
 
-    bn = tod_basename
+    stats = {
+        'failed': 0,
+        'skipped': 0,
+        'ok': 0,
+    }
+
+    for basename in tod_list:
+        try:
+            result = get_tod_spec_one(config, basename, no_plots=opts.no_plots, force=opts.force)
+            result = {True: 'ok', False: 'skipped'}[result]
+        except Exception as e:
+            print(e)
+            result = 'failed'
+            if opts.intolerant:
+                raise e
+        stats[result] += 1
+
+    print('\nSummary:')
+    for (k, v) in stats.items():
+        print('  %-10s:  %4i' % (k, v))
+
+def get_tod_spec_one(config, basename, no_plots=None, force=None):
+
+    bn = basename
     fb = moby2.scripting.products.get_filebase()
     fn = fb.filename_from_name(bn)
     print('tod_name:', bn)
     print('filename:', fn[0])
 
-    config = moby2.util.MobyDict.from_file(cfg_filename)
-
     outputd = moby2.scripting.OutputFiler(
         prefix=config['get_spec']['data_prefix'], data={'basename': bn})
+    ofile = outputd.get_filename('.spec.npz')
+    print('check ofile', ofile)
+
+    if config['get_spec']['skip_existing'] and os.path.exists(ofile) \
+       and not force:
+        print('  ... output exists; skipping.')
+        return False
 
     ttrans = TODTransformer(config)
     tod = ttrans.init_from_tod(fn[0])
@@ -357,7 +400,6 @@ def get_tod_spec_main(args):
 
     # Save spectra.
     units = config['get_spec']['cal_units']
-    ofile = outputd.get_filename('.spec')
     spec.spec = spec.spec[ttrans.mask]
     spec.meta.update({'name': bn,
                       'det_uid': tod.det_uid[ttrans.mask],
@@ -368,8 +410,10 @@ def get_tod_spec_main(args):
 
     # Plot all
     ppref = config['get_spec'].get('plot_prefix')
+    if no_plots:
+        ppref = None
     if ppref is None:
-        o.exit()
+        return True
 
     ttrans.log.trace(0, 'Plotting.')
     outputp = moby2.scripting.OutputFiler(
@@ -420,7 +464,14 @@ def get_tod_spec_main(args):
     labs, arts = list(zip(*[x[1:] for x in legends if x[0] in to_leg]))
     pl.legend(arts, labs, loc='upper right')
     pl.title(spec.meta['name'])
-    pl.xlim(1e-2, spec.f.max())
+    xlims = config['get_spec'].get('plot_spec_xlims')
+    if xlims is not None:
+        pl.xlim(*xlims)
+    else:
+        pl.xlim(1e-2, spec.f.max())
+    ylims = config['get_spec'].get('plot_spec_ylims')
+    if ylims is not None:
+        pl.ylim(*ylims)
     pl.xlabel('f [Hz]')
     pl.ylabel('Spectral density (%s/rtHz)' % spec.meta['cal_units'])
 
@@ -429,3 +480,4 @@ def get_tod_spec_main(args):
     # Show ~white noise by frequency band.
     white_band = config['get_spec'].get('white_noise_band', (10,20))
 
+    return True

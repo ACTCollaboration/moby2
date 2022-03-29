@@ -119,10 +119,12 @@ def process_map(B, F, params={}, freq=None, context=None):
 
     pl.subplot(211)
     pl.title(B)
-    pl.scatter(r[s2]*60., m.data[s2], s=1, alpha=.4)
+    _y = m.data[s2]
+    pl.scatter(r[s2]*60., _y, s=1, alpha=.4)
     z0 = peak_model(pX, np.arctan2(y, x), r[s00])
     pl.xlabel('Radius (arcmin)')
     pl.ylabel('Amplitude')
+    pl.ylim(_y.min(), _y.max())
     pl.subplot(212)
     pl.scatter(r[s00]*60., (z-z0)/pX[0], marker='x')
     pl.xlabel('Radius (arcmin)')
@@ -283,6 +285,23 @@ def summary_op(params, data, cat, mask=None, verbose=False):
                 y = data[k][s]
                 vprint ('  %-10s  %8.3f  %8.3f' % (k, y.mean(), y.std()))
                 grouped[pa][band][k] = (y.mean(), y.std())
+            # FWHM business...
+            phi = data['fwhm_ang'][s] * DEG
+            P = data['fwhm_maj'][s] - data['fwhm_min'][s]
+            Q = P * np.cos(2*phi)
+            U = P * np.sin(2*phi)
+            subd = {'fwhm': data['fwhm'][s],
+                    'fwhm_Q': Q,
+                    'fwhm_U': U}
+            for k, y in subd.items():
+                vprint ('  %-10s  %8.3f  %8.3f' % (k, y.mean(), y.std()))
+                grouped[pa][band][k] = (y.mean(), y.std())
+            I, Q, U = [grouped[pa][band][k][0] for k in ['fwhm', 'fwhm_Q', 'fwhm_U']]
+            P = np.sqrt(Q**2+U**2)
+            vprint ('  %-10s  %8.3f' % ('fwhm_maj', I + P))
+            vprint ('  %-10s  %8.3f' % ('fwhm_min', I - P))
+            vprint ('  %-10s  %8.3f' % ('fwhm_ang', np.arctan2(U, Q)/2/DEG))
+
     return grouped
 
 
@@ -290,8 +309,10 @@ def driver(args):
     from argparse import ArgumentParser
     o = ArgumentParser()
     o.add_argument('param_file')
+    o.add_argument('map_name', nargs='*', help="Maps to purge (if --purge).")
     o.add_argument('-r', '--refit', action='store_true')
     o.add_argument('-u', '--update', action='store_true')
+    o.add_argument('--purge', action='store_true')
     args = o.parse_args(args)
 
     params = moby2.util.MobyDict.from_file(args.param_file)
@@ -311,12 +332,14 @@ def driver(args):
     if not os.path.exists(ofile):
         args.refit = True
 
-    if args.refit:
+    if args.refit or args.update:
         # Get map list.
         basenames, filenames = util.get_map_list(params['source_maps'])
 
         rows = []
         for B,F in zip(basenames, filenames):
+            if (not args.refit) and (B not in args.map_name):
+                continue
             row = process_map(B, F, params['analysis'],
                               context=context)
             rows.append(row)
@@ -326,8 +349,27 @@ def driver(args):
         columns = list(map(np.array, list(zip(*[list(zip(*row))[1] for row in rows]))))
         odb = moby2.util.StructDB.from_data(list(zip(header, columns)))
 
+        # Merge into existing?
+        if not args.refit:
+            idb = moby2.util.StructDB.from_fits_table(ofile)
+            for r in odb:
+                idx = list(idb['name']).index(r['name'])
+                idb[idx] = r
+            odb = idb
+
         logger('\n\nWriting results to %s' % ofile)
         odb.to_fits_table(ofile)
+
+    if args.purge:
+        # Remove specified outputs from the table.
+        data = moby2.util.StructDB.from_fits_table(ofile)
+        mask = np.ones(len(data), bool)
+        for m in args.map_name:
+            mask *= (data['name'] != m)
+        print('Keeping %i of %i ...' % (mask.sum(), len(mask)))
+        data = data[mask]
+        data.to_fits_table(ofile)
+        return
 
     # Summary operations.
     summary_ops = params.get_deep(('output', 'summaries'))

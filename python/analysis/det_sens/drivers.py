@@ -27,7 +27,7 @@ def get_fpfit_planetcal(args):
     opts, args = o.parse_args(args)
 
     cfg = moby2.util.MobyDict.from_file(args[0])
-    blist = moby2.scripting.get_tod_list(cfg['source_tods'],
+    blist = moby2.scripting.get_tod_list(cfg['tod_list'],
                                          cmdline_args=args[1:])
 
     mfb = moby2.scripting.get_filebase()
@@ -121,6 +121,14 @@ def get_fpfit_planetcal(args):
             formats=PLANETCAL_FORMATS)
 
         output.to_fits_table(ofile)
+
+        # Write to a cal archive?
+        cal_archive_file = cfg['output'].get('hdf_archive')
+        if cal_archive_file is not None:
+            with moby2.detectors.CalibrationArchive(cal_archive_file, 'w') as carc:
+                calo = moby2.detectors.Calibration(output['det_uid'])
+                calo.cal[:] = output['pW_to_uK']
+                carc.set_item(b, calo, clobber=True)
 
         # Plot... ?
         pprefix = cfg['output'].get('plot_prefix')

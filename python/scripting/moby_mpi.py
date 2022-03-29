@@ -2,14 +2,16 @@ from __future__ import print_function
 from __future__ import absolute_import
 from past.builtins import basestring
 
+import os
+
 # Set to True or False once import of mpi4py has been attempted.
 mpi_ok = None
-
 
 class MobyMPI:
     def __init__(self, use=True, force=False):
         global mpi_ok
         try:
+            assert(int(os.getenv('DISABLE_MPI', 0)) == 0)
             from mpi4py import MPI
             mpi_ok = True
         except:

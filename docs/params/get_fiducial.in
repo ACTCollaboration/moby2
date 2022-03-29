@@ -1,0 +1,94 @@
+# -*- mode:python -*-
+
+# Input file for moby2 get_fiducial.
+#
+# Basic inputs are the tod_list, and the location of a library of
+# reduced fp_fit results.  From there the user iteratively adjusts the
+# cut thresholds to select a population of fiducial detectors.
+#
+
+get_fid = {
+    # tod_list is an ascii file; tod_id is taken from the first column.
+    'tod_list': './list_pa7.txt',
+
+    # blacklist?
+    #'blacklist': 'blacklist.txt',
+
+    # Pattern for fpfit_reduced should use {tod_id}.
+    #'fpfit_reduced': '../180226/fp_output1/reduced/{tod_id}_fp.fits',
+    'fpfit_reduced': '../200423/fp_output1/reduced/{tod_id}_fp.fits',
+
+    # The output_prefix can make use of tod_info keys, such as array
+    # and season.  These are based on the first TOD in the list.
+    'output_prefix': 'plots_fid/{array}_{season}_',
+
+    # The rms_cut is used to reject observations from consideration.
+    # The RMS statistic is computed on each observation (in each
+    # band).  It's the fractional RMS of planet amplitudes, within a
+    # single band, considering amps within the 10-90% percentiles.
+    # The observation will be cut if the statistic is greater than the
+    # value set here.  If you see lots of "cut for high rms" messages,
+    # increase this parameter.
+    'rms_cut': 1.0,
+    #'rms_cut': 0.085,
+
+    # The min_n_obs cut is used to reject detectors if they have too
+    # few valid observations.  This applies to the fiducial and
+    # flatfield consideration.
+    'min_n_obs': 2,
+
+    # The min_frac_obs cut is used to reject detectors if they are not
+    # represented in a sufficiently high fraction of all considered
+    # observations.  Note this applies to fiducial dets only.
+    'min_frac_obs': 0.1,
+
+    # The flatfield will be computed relative to the calibration
+    # described here.  The cal is computed and cached in the specified
+    # depot.
+    'local_cal': [
+        #{'_execcfg': 'bias_steps.in:cal_190802'},
+        {'_execcfg': '{cfglib}/defaults.in:cal_dac_to_iv_pw'},
+        {'name': 'Optical sign',
+         'type': 'array_data_parameter',
+         'parameter': 'optical_sign'},
+        ],
+    'local_cal_depot': './depot/',
+    'local_cal_tag': 'cal_dac_bs',
+
+    # For selecting fiducial detectors, ranges of acceptable values for
+    # amplitude and fractional rms, by freq band.
+    'fiducial_selection': [
+        {'fcode': 'f027',
+         'amp': (0.001, 0.200),
+         'frms': (0.001, 0.10),
+         },
+        {'fcode': 'f039',
+         'amp': (0.001, 0.200),
+         'frms': (0.001, 0.10),
+         },
+        {'fcode': 'f090',
+         'amp': (.004, .010),
+         'frms': (0.02, .10),
+         },
+        {'fcode': 'f150',
+         'amp': (.015, .03),
+         'frms': (.02, 0.125),
+         },
+        {'nom_freq': 'f220',
+         'amp': (.010, .016),
+         'frms': (.0, .11),
+         },
+    ],
+
+    # common_mode_check requires the depot output from a planetCuts
+    # run... you can suppress this analysis by setting to None.
+    'common_mode_check': None,
+    '_X': {
+        'planet_depot': '../170301/depot/',
+        'cm_file': 'CommonMode/140117b/{first_five}/{tod_name}.fits',
+        'cal_in': {'_execcfg': '{cfglib}/defaults.in:cal_iv_pw'},
+        'cal_out': {'type': 'depot_cal',
+                    'tag': '140117b',
+                    'depot': {'path': '../170301/depot'}},
+        }
+}

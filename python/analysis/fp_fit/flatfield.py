@@ -109,15 +109,14 @@ def get_fiducial_main(args_in):
     outputm = moby2.scripting.OutputFiler(prefix=cfg.get('output_prefix','./'),
                                           data=tod_info)
 
-    nom_freqs = adata['nom_freq']
-    all_nom_freqs = sorted([x for x in set(nom_freqs) if x!=0])
+    fcodes = adata['fcode']
+    all_fcodes = sorted([x for x in set(fcodes) if x!='f000'])
 
-    n_det = len(nom_freqs)
+    n_det = len(fcodes)
     all_amps = np.zeros((len(rows), n_det))
     inputs_ok = np.zeros((len(rows), n_det, 2), bool)
 
-    for nom_freq in all_nom_freqs:
-        fcode = 'f%03i' % nom_freq
+    for fcode in all_fcodes:
         print()
         print('Frequency band: ', fcode)
         print()
@@ -126,7 +125,7 @@ def get_fiducial_main(args_in):
         stats = []
         for (name, uids, amps, cal_mask, fp_mask), out, inp in \
             zip(rows, all_amps, inputs_ok):
-            s0 = (nom_freqs[uids] == nom_freq) # channel select
+            s0 = (fcodes[uids] == fcode) # channel select
             inp[uids[s0],0] = fp_mask[s0]
             inp[uids[s0],1] = cal_mask[s0]
             s = s0 * cal_mask * fp_mask
@@ -147,9 +146,13 @@ def get_fiducial_main(args_in):
             out[uids[s]] = amps
             stats.append((a0, da, r, ))
 
+        if len(stats) == 0:
+            print('   -- no data, next.')
+            continue
+
         # Plot showing the rmses
         rms_all = np.array(stats)[:,2]
-        print(rms_all)
+        #print(rms_all)
         pl.scatter(np.arange(len(rms_all)), np.log10(rms_all))
         pl.axhline(np.log10(rms_cut), ls='dotted')
         pl.title('Use this to tune the rms_cut.')
@@ -195,17 +198,17 @@ def get_fiducial_main(args_in):
     #
     sel_lims = {}
     for entry in cfg['fiducial_selection']:
-        if 'nom_freq' in entry:
-            sel_lims[entry['nom_freq']] = entry
+        if 'fcode' in entry:
+            sel_lims[entry['fcode']] = entry
         else:
             sel_lims['_default'] = entry
 
-    for nf in all_nom_freqs:
-        s = (nom_freqs == nf)*fits['flat_ok']
+    for nf in all_fcodes:
+        s = (fcodes == nf)*fits['flat_ok']
         print('Considering %i for band %s' % (s.sum(), nf))
         qual = fits['frms'][s]
         pl.hist(qual, alpha=.4, bins=np.arange(.01, .5, .01),
-                label='F=%3i GHz' % nf)
+                label=nf)
         lims = sel_lims.get(nf, sel_lims.get('_default', {}))
         for x in lims.get('frms', []):
             pl.axvline(x, ls='dotted')
@@ -219,8 +222,8 @@ def get_fiducial_main(args_in):
     #
     # Scatter plot of fractional RMS vs. amplitude.
     #
-    for nf in all_nom_freqs:
-        s = nom_freqs == nf
+    for nf in all_fcodes:
+        s = fcodes == nf
         s1 = (~fits['is_fid'])[s]
         amp, frms = fits['amp'][s], fits['frms'][s]
         xlim, xmask = limit_mask(amp)
@@ -239,13 +242,13 @@ def get_fiducial_main(args_in):
         pl.xlim(*xlim)
         pl.ylim(*ylim)
         pl.legend(loc='best', fontsize=10)
-        pl.title(pretitle + ' %3ighz - Fiducial det selection' % nf)
-        outputm.savefig('21_f%03d.png' % nf)
+        pl.title(pretitle + ' %s - Fiducial det selection' % nf)
+        outputm.savefig('21_%s.png' % nf)
 
     # In each band: mark the fiducial detectors, and compute flatfield.
     print('Summary:')
-    for nf in all_nom_freqs:
-        s = (nom_freqs == nf) * fits['flat_ok']
+    for nf in all_fcodes:
+        s = (fcodes == nf) * fits['flat_ok']
         is_fid = s * fits['is_fid']
         lims = sel_lims.get(nf, sel_lims.get('_default', {}))
         amp, frms = fits['amp'], fits['frms']
@@ -260,7 +263,7 @@ def get_fiducial_main(args_in):
         fits['flat_recal'][s] = recal[s]
         fits['is_fid'][s] = is_fid[s]
         print(' Frequency: ', nf)
-        for k,v in [('detectors', (nom_freqs==nf).sum()),
+        for k,v in [('detectors', (fcodes==nf).sum()),
                     ('flatfielded', s.sum()),
                     ('stable', fits['is_fid'][s].sum())]:
             print('   %-20s:  %6i' % (k,v))
@@ -271,8 +274,8 @@ def get_fiducial_main(args_in):
     sep = 1./60
     x0 = x0 + (adata['pol_family']=='A')*sep
 
-    for nf in all_nom_freqs:
-        s = (nom_freqs == nf) * fits['flat_ok']
+    for nf in all_fcodes:
+        s = (fcodes == nf) * fits['flat_ok']
         pl.scatter(x0[s], y0[s], c=1./fits['flat_recal'][s],
                    vmin=0, vmax=2, s=30, label='flat field')
         pl.colorbar()
@@ -281,8 +284,8 @@ def get_fiducial_main(args_in):
             pl.scatter(x0[not_fid], y0[not_fid], marker='x', color='k',
                        s=20, label='non fiducial')
         pl.legend(loc='best', fontsize=10)
-        pl.title(pretitle + ' %3ighz - Relative efficiency' % nf)
-        outputm.savefig('30_f%03d_flatfield.png' % nf)
+        pl.title(pretitle + ' %s - Relative efficiency' % nf)
+        outputm.savefig('30_%s_flatfield.png' % nf)
 
     # Write out full db...
     fits.to_column_file(outputm.get_filename('stats.txt'))
@@ -306,7 +309,7 @@ def get_fiducial_main(args_in):
     print()
     print('Common mode check...')
     print('# TOD                    ', end=' ')
-    for nf in all_nom_freqs:
+    for nf in all_fcodes:
         print('n%03i %6s %6s' % (nf, 'mean', 'rms'), end=' ')
     print()
 
@@ -328,8 +331,8 @@ def get_fiducial_main(args_in):
         s = (idx>=0)*(cal0.cal!=0)*(cal1.cal!=0) * (db['stable'][idx]==1)
         # We expect cal1 / cal0 to be the same as the flatfield value.
         print(b, end=' ') 
-        for nf in all_nom_freqs:
-            s1 = (nom_freqs[idx] == nf) * s
+        for nf in all_fcodes:
+            s1 = (fcodes[idx] == nf) * s
             r = cal0.cal[s1] / cal1.cal[s1] * db['cal'][idx[s1]]
             print('%4i %6.3f %6.3f' % (len(r), r.mean(), r.std()), end=' ')
         print()

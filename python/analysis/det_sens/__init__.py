@@ -15,5 +15,6 @@ from . import array_sens
 from . import planet_cal
 from . import fit_planet_cal
 from .fit_planet_cal import RecalModel
+from . import refit_planet_cal
 
 from .drivers import get_fpfit_planetcal, get_map_planetcal, get_cal_noise

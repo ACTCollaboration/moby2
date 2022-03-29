@@ -39,14 +39,30 @@ def get_tod(params, aman=None):
         'dets':
         core.LabelAxis('dets', ['%s_%04i' % (pa, d) for d in tod.det_uid]),
         'samps':
-        core.OffsetAxis('samps', count, 0, tod.info.basename),
+        core.OffsetAxis('samps', count, params.get('start', 0),
+                        tod.info.basename),
     }
 
     data = core.AxisManager(axes['dets'], axes['samps'])
-    data.wrap('signal', tod.data, [(0, 'dets'), (1, 'samps')])
+    if params.get('read_data', True):
+        data.wrap('signal', tod.data, [(0, 'dets'), (1, 'samps')])
+    else:
+        data.wrap('signal', None)
     data.wrap('timestamps', tod.ctime, [(0, 'samps')])
 
     del tod.data, tod.ctime
+
+    # Include a cal to remove readout filter gain.
+    data.wrap('readout_filter_cal',
+              np.ones(data.dets.count) / tod.info.mce_filter.gain(),
+              [(0, 'dets')])
+
+    # Describe the filter -- this is already obsolete... use iir_params!
+    data.wrap('mce_filter_params',
+              np.array(tod.info.mce_filter.params))
+
+    iir_params = mce_to_iir(tod.info.mce_filter.params, tod.info.mce_filter.f_samp)
+    data.wrap('iir_params', iir_params)
 
     flags = core.AxisManager(axes['samps'])
     flags.wrap('enc_flags', tod.enc_flags, [(0, 'samps')])
@@ -81,9 +97,32 @@ def get_tod(params, aman=None):
     return (data, tod)
 
 
-def actpol_load_observation(db, obs_id, dets=None, prefix=None):
+def mce_to_iir(p, f_mux):
+    """Converts MCE filter params p and muxing frequency f_mux to an
+    iir_params block suitable for use with sotodlib
+    (tod_ops.filters.iir_filter).
+
+    Returns:
+      Array output with shape (3, n).  Polynomial coefficients are a =
+      output[0], b = output[1], and fscale = output[2][0].
+
+    """
+    K = 1./2**14
+    scalars = [K, K, K, K, 1., 1.]
+    b11, b12, b21, b22, k1, k2 = [s*p for s,p in zip(scalars, p)]
+    a = np.array([1., - b11 - b21, b11*b21 + b12 + b22, - b11 * b22 - b21 * b12, b12*b22])
+    b = np.array([1., 4, 6, 4, 1]) / 2**(k1+k2)
+    fscale = b*0 + 1./f_mux
+    return np.array([a, b, fscale])
+
+
+def actpol_load_observation(db, obs_id, dets=None, samples=None,
+                            no_signal=None, prefix=None, **kwargs):
     """Load observation -- keep this compatible with sotodlib.Context
     get_obs interface."""
+    if len({k: v for k, v in kwargs.items() if v is not None}):
+        raise RuntimeError(f'This function does not understand args: {kwargs}')
+
     aman = None
     if dets is not None:
         # Then it is a list of dets.  Restrict the list to only things
@@ -101,12 +140,21 @@ def actpol_load_observation(db, obs_id, dets=None, prefix=None):
     if prefix is None:
         prefix = ''
 
+    start, end = 0, None
+    if samples is not None:
+        start, end = samples
+
     # Use the db to get the filename.
     files_by_detset = db.get_files(obs_id, prefix=prefix)
     assert(len(files_by_detset) == 1)
     for detset, fileidx in files_by_detset.items():
         assert(len(fileidx) == 1)
         filename, sample_start, sample_stop = fileidx[0]
-        aman, tod = get_tod({'filename': filename}, aman=aman)
+        aman, tod = get_tod({'filename': filename,
+                             'repair_pointing': True,
+                             'read_data': (no_signal is not True),
+                             'start': start,
+                             'end': end}, aman=aman)
+
     return aman
 

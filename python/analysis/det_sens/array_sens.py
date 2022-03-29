@@ -14,7 +14,13 @@ import os
 class ArrayDataArchive:
     def __init__(self):
         self.adata = {}
-    def get(self, season, array):
+    def get(self, info):
+        season = info.get('season')
+        if season is None:
+            season = '20' + info['scode'][1:]
+        array = info.get('array')
+        if array is None:
+            array = 'ar' + info['pa'][-1:]
         if not season in self.adata:
             self.adata[season] = {}
         if not array in self.adata[season]:
@@ -127,10 +133,9 @@ def main(args_in=[]):
 
     ofiler = moby2.scripting.OutputFiler(prefix=cfg['array_sens']['prefix'])
 
-    grouper = GroupMasker(cfg['array_sens']['group_by'],
-                          array=planet_db['array'],
-                          season=planet_db['season'],
-                          hwp_epoch=planet_db['hwp_epoch'])
+    group_by = cfg['array_sens']['group_by'] # e.g. ['scode', 'pa']
+    grp_data = dict([(k, planet_db[k]) for k in group_by])
+    grouper = GroupMasker(group_by, **grp_data)
     
     while True:
         info, mask = grouper.get_mask()
@@ -138,7 +143,7 @@ def main(args_in=[]):
             break
         if mask.sum() < 0:
             continue
-        tag = '_'.join([info[k] for k in cfg['array_sens']['group_by']])
+        tag = '_'.join([info[k] for k in group_by])
         TAG = tag.upper()
         print('Selecting', tag)
         print(' count: ', mask.sum())
@@ -146,7 +151,7 @@ def main(args_in=[]):
             print()
             continue
 
-        adata = adata_src.get(season=info['season'], array=info['array'])
+        adata = adata_src.get(info)
         n_uid = adata['det_uid'].max()+1
 
         #print 'Typical PWV:', np.median(planet_db[kept]['pwv'])
@@ -161,16 +166,16 @@ def main(args_in=[]):
                 red_sens[i] = np.median(x[_s])
 
         absurd_level = demands['min_det_noise']
-        all_freqs = sorted(list(set(adata['nom_freq']).difference({0.})))
+        all_freqs = sorted(list(set(adata['fcode']).difference({'f000'})))
 
         # Total band sensitivity vs. loading?
         for f,p in zip(all_freqs, 'bgrk'):
             arr_sens = np.zeros(all_sens.shape[1])
             x = all_sens[:n_uid,:].copy()
-            x_s = (x > absurd_level)*mask[None,:]*(adata['nom_freq']==f)[:,None]
+            x_s = (x > absurd_level)*mask[None,:]*(adata['fcode']==f)[:,None]
             x[~x_s] = 1.
             if np.all(~x_s):
-                print(' ...no survivors at %i GHz.  Next.' % f)
+                print(' ...no survivors at %s.  Next.' % f)
                 continue
             fig, axes = pl.subplots(3, 1, figsize=(6., 7),
                                     sharex=True,sharey=False, squeeze=True)
@@ -188,7 +193,7 @@ def main(args_in=[]):
             scargs = {'c': planet_day[a_s],
                       'alpha': .7, 's': 30}
             ylargs = {'fontsize':10}
-            pl.title('%s - %3i GHz' % (TAG, f))
+            pl.title('%s - %s' % (TAG, f))
             pl.scatter(planet_db['loading'][a_s], det_count[a_s], **scargs)
             pl.axhline(n_eff, ls='dotted', color='k')
             pl.colorbar()
@@ -214,8 +219,7 @@ def main(args_in=[]):
                     distances.append((abs(delta1/delta-1), delta1))
                 _, delta = min(distances)
                 ax.yaxis.set_major_locator(pl.MultipleLocator(delta))
-            ofiler.savefig('sens_%s_30_%03i_sens_load.png' % (tag, f))
-
+            ofiler.savefig('sens_%s_30_%s_sens_load.png' % (tag, f))
 
         # Save that?
         s = (red_sens!=0)
@@ -235,15 +239,14 @@ def main(args_in=[]):
         # histogram...
         max_sens = min(np.median(red_sens[s])*5, red_sens[s].max())
         bins = np.arange(0, max_sens, max_sens/40)
-        all_freqs = sorted(list(set(adata['nom_freq']).difference({0.})))
         for f,p in zip(all_freqs, 'bgrk'):
-            fs = (adata['nom_freq']==f)
+            fs = (adata['fcode']==f)
             if not fs.any(): continue
             x = red_sens[fs*s]
             pl.hist(x, bins=bins,
-                     label= '%3i GHz' % (f), alpha=.8, color=p)
+                     label= '%s' % (f), alpha=.8, color=p)
             x = x[x>absurd_level]
-            print('  array sens @%i GHz: ' % f, (x**-2).sum()**-.5 / 2**.5, 'uK rtsec')
+            print('  array sens @%s: ' % f, (x**-2).sum()**-.5 / 2**.5, 'uK rtsec')
 
         pl.legend(loc='upper right')
         pl.xlabel('Sens at 20 Hz (uK/rtHz)')
@@ -251,18 +254,17 @@ def main(args_in=[]):
         ofiler.savefig('sens_%s_00_hist.png' % tag)
 
         # Cumulative detector weight.
-        max_sens = min(np.median(red_sens[s])*5, red_sens[s].max())
-        bins = np.arange(0, max_sens, max_sens/40)
-        all_freqs = sorted(list(set(adata['nom_freq']).difference({0.})))
         for f,p in zip(all_freqs, 'bgrk'):
-            fs = (adata['nom_freq']==f)
+            fs = (adata['fcode']==f) * s
             if not fs.any(): continue
-            x = red_sens[fs*s]
+            x = red_sens[fs]
             xs = np.sort(x)
             w = xs**-2
             n = np.cumsum(w)**-.5
-            pl.plot(np.arange(len(n))+1, n,
-                     label= '%3i GHz' % (f), alpha=.8, color=p)
+            pl.semilogy(np.arange(len(n))+1, n,
+                     label='%s' % (f), alpha=.8, color=p)
+            pl.axhline(n[-1], label='%.1f uK/rtHz' % (n[-1]),
+                       color=p, ls='dashed')
 
         pl.legend(loc='upper right')
         pl.xlabel('N detectors contributing')
@@ -279,16 +281,17 @@ def main(args_in=[]):
         for spi, (f,p) in enumerate(zip(all_freqs, 'bgrk')):
             pl.figure(figsize=(5.5,4.5))
             #pl.sca(axes[spi])
-            fs = (adata['nom_freq']==f)
+            fs = (adata['fcode']==f) * s
             if not fs.any(): continue
-            z = red_sens[fs*s]
+            z = red_sens[fs]
             x, y = adata['sky_x'] + spa*(adata['pol_family']=='B'), adata['sky_y']
-            pl.scatter(x[fs*s], y[fs*s], s=siz, c=z, vmin=0, vmax=max_sens,
-                       cmap='jet')
+            max_sens = min(np.median(red_sens[fs])*3, red_sens[fs].max())
+            pl.scatter(x[fs], y[fs], s=siz, c=z, vmin=0, vmax=max_sens,
+                       cmap='viridis')
             #label='%i GHz' % f)
             #pl.legend(loc='upper right')
             pl.colorbar()
-            pl.title('%s - %3i GHz' % (TAG, f))
-            ofiler.savefig('sens_%s_01_%03i_pos.png' % (tag, f))
+            pl.title('%s - %s' % (TAG, f))
+            ofiler.savefig('sens_%s_01_%s_pos.png' % (tag, f))
 
         print()

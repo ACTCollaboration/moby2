@@ -4,7 +4,7 @@ from past.builtins import basestring
 import numpy as np
 
 def read_columns(filename, columns=None, skip=0, dtypes={},
-                 comments='#'):
+                 comments='#', delim=None):
     """
     Read whitespace-delimited columnar data from a text file.
 
@@ -24,8 +24,11 @@ def read_columns(filename, columns=None, skip=0, dtypes={},
         fin = open(filename)
     else:
         fin = filename
-    for line in fin:
-        row = line.split()
+    for line_i, line in enumerate(fin):
+        if delim is None:
+            row = line.split() # whitespace
+        else:
+            row = line.split(delim) # commas or whatever
         if len(row) == 0 or row[0][0] in comments:
             continue
         if skip > 0:
@@ -39,7 +42,12 @@ def read_columns(filename, columns=None, skip=0, dtypes={},
                 nc = len(columns)
             data = [[] for c in columns]
         for i,c in enumerate(columns):
-            data[i].append(row[c])
+            try:
+                data[i].append(row[c])
+            except:
+                raise ValueError(
+                    'Failed to find column '
+                    '%i on row %i of valid data.' % (c, len(data[i]) + 1))
     if data is None:
         return None
     for i,c in enumerate(columns):

@@ -1,10 +1,20 @@
-# Convert certain ACTPol metadata to simonsobs database formats.
-#
+"""This submodule provides functions to convert key moby2 data
+structures into databases compatible with the sotodlib Context system.
+It also helps to index ACTPol metadata archives (such as directories
+full of cuts and calibration files) for use with the Context system.
+
+"""
 
 import moby2
 from sotodlib.core import metadata
 
-__all__ = ['make_detdb', 'make_obsdb']
+import os
+import re
+
+__all__ = ['make_detdb', 'make_obsdb', 'make_obsfiledb', 'make_cuts_db', 'make_cal_db']
+
+
+TOD_ID_PAT =  '[0-9]{10}\.[0-9]{10}\.ar.'
 
 
 def make_detdb():
@@ -50,14 +60,14 @@ def make_detdb():
         ('pa4', 's17', {'array_name': 'pa4', 'optics_tube': 1}),
         ('pa5', 's17', {'array_name': 'pa5', 'optics_tube': 2}),
         ('pa6', 's17', {'array_name': 'pa6', 'optics_tube': 3}),
-#        ('pa7', 's20', {'pa': 'pa7', 'optics_tube': 3}),
+        ('pa7', 's20', {'array_name': 'pa7', 'optics_tube': 3}),
     ]
 
     for pa, scode, info in targets:
         adata = moby2.scripting.products.get_array_data_new(
             {'array': pa, 'season': scode})
         base_map = [
-            (k, k) for k in ['optical_sign', 'det_type', 'pol_family']
+            (k, k) for k in ['optical_sign', 'det_type', 'wafer', 'pol_family']
         ]
         other_maps = [
             ('mce', [
@@ -89,14 +99,115 @@ def make_detdb():
     return db
 
 
-def make_obsdb():
-    db = metadata.ObsDb()
-    cat = moby2.scripting.get_obs_catalog()
-    c = db.conn.cursor()
-    s = cat['tod_name'] != '1410143132.1018'
-    for i in s.nonzero()[0]:
-        c.execute('insert into obs (obs_id, timestamp) values (?,?)',
-                  (cat[i]['tod_name'],
-                   float(cat[i]['ctime'])))
-    db.conn.commit()
+def make_obsdb(cat=None):
+    """Convert an ObsCatalog to an ObsDb.  If a catalog is not provided,
+    the default is loaded.
+
+    """
+    if cat is None:
+        cat = moby2.scripting.get_obs_catalog()
+    obsdb = metadata.ObsDb()
+    obsdb.add_obs_columns([
+        'timestamp float',
+        'pa string',
+        'scode string',
+        'obs_type string',
+        'obs_detail string',
+    ])
+    for i in cat['tod_name'].argsort():
+        tags = []
+        row = cat[i]
+        obs_id = row['tod_name']
+        data = {
+            'timestamp': float(row['ctime'])
+        }
+        data.update({k: row[k] for k in ['pa', 'obs_type', 'obs_detail', 'scode']})
+        if row['obs_type'] == 'planet':
+            tags.extend(['planet', row['obs_detail']])
+        obsdb.update_obs(obs_id, data=data, tags=tags, commit=False)
+
+    obsdb.conn.commit()
+    return obsdb
+
+
+def make_obsfiledb(cat=None, filebase=None, detdb=None, db_in=None,
+                   ignore_duplicates=True):
+    """Make an ObsFileDb using the moby2 filebase and an ObsCatalog.  If a
+    catalog is not provided, the default is loaded.
+
+    """
+    if cat is None:
+        cat = moby2.scripting.get_obs_catalog()
+    if detdb is None:
+        detdb = make_detdb()
+    ignore = []
+    if db_in is None:
+        obsfiledb = metadata.ObsFileDb()
+        pas = sorted(list(set(cat['pa'])))
+        for pa in pas:
+            names = detdb.dets(props={'array_name': pa})['name']
+            obsfiledb.add_detset(pa, names)
+    else:
+        obsfiledb = db_in
+        if ignore_duplicates:
+            ignore = db_in.get_obs()
+    if filebase is None:
+        filebase = moby2.scripting.get_filebase()
+    for row in cat:
+        obs_id = row['tod_name']
+        if obs_id in ignore:
+            continue
+        f = filebase.get_full_path(obs_id)
+        if f is None:
+            continue
+        detset = row['pa']
+        obsfiledb.add_obsfile(f, obs_id, detset, None)
+    return obsfiledb
+
+
+def _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, re_suffix):
+    scheme = metadata.ManifestScheme()\
+             .add_exact_match('obs:obs_id')\
+             .add_data_field('loader')
+    # Additional restrictions...
+    for k in restrictions:
+        scheme.add_data_field(k)
+    if db_in is None:
+        db = metadata.ManifestDb(scheme=scheme)
+        ignore = []
+    else:
+        db = db_in
+        ignore = [r[0] for r in db.conn.execute('select distinct `obs:obs_id` from map')]
+    product_re = re.compile('(%s)%s' % (TOD_ID_PAT, re_suffix))
+    entry = dict(restrictions)
+    entry['loader'] = loader
+    for root, dirs, files in os.walk(root_dir):
+        for f in files:
+            m = product_re.fullmatch(f)
+            if m is None:
+                continue
+            entry['obs:obs_id'] = m.group(1)
+            if entry['obs:obs_id'] in ignore:
+                continue
+            db.add_entry(entry, filename=os.path.join(root, f))
     return db
+
+
+def make_cuts_db(root_dir, loader=None, restrictions={},
+                 db_in=None):
+    """Scan root_dir for cuts results and add them to ManifestDb.
+
+    """
+    if loader is None:
+        loader = 'actpol_cuts'
+    return _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, '\.cuts')
+
+
+def make_cal_db(root_dir, loader=None, restrictions={},
+                 db_in=None):
+    """Scan root_dir for cal results and add them to ManifestDb.
+
+    """
+    if loader is None:
+        loader = 'actpol_cal'
+    return _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, '\.cal')

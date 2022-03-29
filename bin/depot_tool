@@ -66,18 +66,16 @@ import optparse as o
 o = o.OptionParser(usage="")
 o.add_option('-l', '--tod-list')
 o.add_option('-c', '--column', type=int, default=0)
+o.add_option('--depot', default='./')
+o.add_option('-e', '--export-to')
 o.add_option('--profile')
 o.add_option('--verbose', action='store_true')
 opts, args = o.parse_args()
 
-CMD = args[0]
-if CMD == 'scan':
-    tag_path = args[1]
-elif CMD == 'export':
-    tag_path = args[1]
-    zipfile = args[2]
-else:
-    o.error('Expected command from: scan,export.')
+tag_path = args[0]
+
+while tag_path.endswith('/'):
+    tag_path = tag_path[:-1]
 
 depot_dir, tag = os.path.split(tag_path)
 
@@ -95,7 +93,8 @@ for p in profiles_to_scan:
     p = profiles_dict[p]
     matches = glob.glob(os.path.join(depot_dir, p['glob'].format(tag=tag)))
     match_sets.append((len(matches), p, matches))
-match_sets.sort()
+
+match_sets.sort(key=lambda x: x[0], reverse=True)
 n, p, matches = match_sets[0]
 if n > 0:
     print('Looks like this is a tag for "%s"' % p['name'])
@@ -132,11 +131,16 @@ else:
     print('Depot tag item count:         %6i' % len(matches))
     working_items = matches
 
-if CMD == 'scan':
-    pass
-elif CMD == 'export':
-    archive_name = os.path.join(os.getcwd(), zipfile)
+if opts.export_to:
+    archive_name = os.path.join(os.getcwd(), opts.export_to)
+    if opts.depot is not None:
+        depot_dir = opts.depot
     # Strip depot name from those paths.
-    rel_items = ['./'+w[len(depot_dir):] for w in working_items]
-    print(zip_files(archive_name, depot_dir, rel_items,
-                    verbose=opts.verbose))
+    rel_items = [os.path.relpath(w, depot_dir) for w in working_items]
+    if len(rel_items) == 0:
+        print('No items to export')
+    else:
+        if rel_items[0].startswith('..'):
+            o.error('Files not root in current dir, pass --depot to set root of depot.')
+        print(zip_files(archive_name, depot_dir, rel_items,
+                        verbose=opts.verbose))
