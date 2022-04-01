@@ -22,6 +22,7 @@ programs for analyzing ACTpol observations.
    fits_table
    analysis
    misc
+   socompat
 
 ..
   Indices and tables
