@@ -147,14 +147,31 @@ class StructDB(np.ndarray):
             if not k in self.dtype.names:
                 print("Property %s not defined for array." % k)
                 return matched
-        # Find each.
-        for ip, p in enumerate(props):
-            s = np.ones(len(self), 'bool')
-            for k, v in zip(keys, p):
-                s *= self[k] == v
-            i = s.nonzero()[0]
-            if len(i) > 0:
-                matched[ip] = i
+        # Accelerate in case of single key, long lists.
+        if len(keys) == 1 and len(self) > 1000:
+            idx0 = np.argsort(self[keys[0]])
+            idx1 = np.argsort(np.array(props)[:,0])
+            all_items = self[keys[0]][idx0]
+            keep_items = np.array(props)[:,0][idx1]
+            i0, i1 = 0, 0
+            while i0 < len(all_items) and i1 < len(keep_items):
+                if all_items[i0] < keep_items[i1]:
+                    i0 += 1
+                elif all_items[i0] > keep_items[i1]:
+                    i1 += 1
+                else:
+                    matched[idx1[i1]] = idx0[i0]
+                    i1 += 1
+        else:
+            # Find each.
+            for ip, p in enumerate(props):
+                s = np.ones(len(self), 'bool')
+                for k, v in zip(keys, p):
+                    s *= self[k] == v
+                i = s.nonzero()[0]
+                if len(i) > 0:
+                    matched[ip] = i
+
         if mask:
             mask = np.zeros(len(self), 'bool')
             mask[matched[matched>=0]] = True
