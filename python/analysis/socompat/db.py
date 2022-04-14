@@ -97,6 +97,7 @@ def make_detdb():
             data = {dest: adata[src][u].tolist() for src, dest in base_map}
             data['old_det_id'] = u.tolist()
             data['band'] = 'f%03i' % float(adata['nom_freq'][u])
+            data['name'] = new_uid
             data.update(info)
             db.add_props('base', new_uid, **data,
                          commit=False)
@@ -176,7 +177,7 @@ def make_obsfiledb(cat=None, filebase=None, detdb=None, db_in=None,
 
 
 def make_pointofs_hdf(offsets_file, hdf_out, dataset='pointofs',
-                      obs_list=None):
+                      obs_list=None, hdf_relout=None):
     # Read offsets ...
     data = moby2.util.StructDB.from_column_file(
         offsets_file, [('obs:obs_id', 0),
@@ -191,6 +192,8 @@ def make_pointofs_hdf(offsets_file, hdf_out, dataset='pointofs',
         assert(np.all(idx > 0))
         data = data[idx]
 
+    if hdf_relout is None:
+        hdf_relout = hdf_out
     with h5py.File(hdf_out, 'a') as h:
         rs = metadata.ResultSet(data.dtype.names)
         rs.rows.extend(list(data))
@@ -204,7 +207,7 @@ def make_pointofs_hdf(offsets_file, hdf_out, dataset='pointofs',
     man.add_entry({'obs:timestamp': (0,2e9),
                    'dataset': dataset,
                    'loader': 'actpol_pointofs'},
-                  hdf_out,
+                  hdf_relout,
                   commit=False)
     man.conn.commit()
     return man
@@ -241,7 +244,8 @@ def make_abscal_hdf(offsets_file, hdf_out, dataset='abscal'):
     return man
 
 
-def _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, re_suffix):
+def _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, re_suffix,
+                         source_prefix):
     scheme = metadata.ManifestScheme()\
              .add_exact_match('obs:obs_id')\
              .add_data_field('loader')
@@ -260,33 +264,36 @@ def _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, re_suffix):
     for root, dirs, files in os.walk(root_dir):
         for f in files:
             m = product_re.fullmatch(f)
+            print(f, m)
             if m is None:
                 continue
             entry['obs:obs_id'] = m.group(1)
             if entry['obs:obs_id'] in ignore:
                 continue
-            db.add_entry(entry, filename=os.path.join(root, f))
+            db.add_entry(entry, filename=os.path.join(source_prefix, root, f))
     return db
 
 
 def make_cuts_db(root_dir, loader=None, restrictions={},
-                 db_in=None):
+                 db_in=None, source_prefix=''):
     """Scan root_dir for cuts results and add them to ManifestDb.
 
     """
     if loader is None:
         loader = 'actpol_cuts'
-    return _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, '\.cuts')
+    return _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, '\.cuts',
+                                source_prefix=source_prefix)
 
 
 def make_cal_db(root_dir, loader=None, restrictions={},
-                 db_in=None):
+                 db_in=None, source_prefix=''):
     """Scan root_dir for cal results and add them to ManifestDb.
 
     """
     if loader is None:
         loader = 'actpol_cal'
-    return _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, '\.cal')
+    return _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, '\.cal',
+                                source_prefix=source_prefix)
 
 def process_cuts_release(release_filename, temp_dir='temp/',
                          output_dir='./',

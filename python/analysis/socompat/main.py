@@ -31,6 +31,23 @@ def load_tod_list(filename, fmt=None):
         tod_id = db['tod_id']
     return tod_id
 
+def relativify_paths(srcdir, odir):
+    """Returns (srcdir_from_here, srcdir_relpath).  If srcdir is and odir
+    are both relative, then srcdir_from_here is simply srcdir but
+    srcdir_relpath is a prefix that can be used to reach srcdir
+    starting from the odir.  Otherwise, srcdir_from_here is the
+    absolute path to srcdir and srcdir_relpath is ''.
+
+    """
+    rel = ''
+    if srcdir[0] == '/':
+        pass
+    elif odir[0] == '/':
+        srcdir = os.path.abspath(srcdir)
+    else:
+        rel = os.path.relpath('./', odir)
+    return (srcdir, rel)
+
 
 def get_parser():
     parser = argparse.ArgumentParser()
@@ -48,7 +65,7 @@ def get_parser():
 
     p = sp.add_parser('pointofs', help="Write out a per-TOD pointofs archive.")
     p.add_argument('infile')
-    p.add_argument('h5file')
+    p.add_argument('h5file', help="Path of HDF5 output (relative to output dir).")
     p.add_argument('--dataset', default='pointofs')
     p.add_argument('--db-file', default='pointofs.sqlite')
 
@@ -62,12 +79,22 @@ def get_parser():
     p.add_argument('--db-file', default='timeconst.sqlite')
 
     p = sp.add_parser('focalplane', help="Write out a per-TOD pointofs archive.")
-    p.add_argument('spec_file')
-    p.add_argument('h5file')
+    p.add_argument('spec_file', help="Filename to focal plane definitions.")
+    p.add_argument('h5file', help="Path of HDF5 output (relative to output dir)." )
     p.add_argument('--db-file', default='focalplane.sqlite')
 
     p = sp.add_parser('cuts_release', help="Process a cuts release into cuts+cal archives.")
     p.add_argument('release_file')
+
+    p = sp.add_parser('cuts_dir', help=
+                      "Create an index for a single cuts depot result.")
+    p.add_argument('src_dir', help="Path to cuts dir (relativity will be preserved).")
+    p.add_argument('--db-file', default='cuts.sqlite')
+
+    p = sp.add_parser('cal_dir', help=
+                      "Create an index for a single cal depot result.")
+    p.add_argument('src_dir', help="Path to cuts dir (relativity will be preserved).")
+    p.add_argument('--db-file', default='cuts.sqlite')
 
     p = sp.add_parser('context', help="Write a context.yaml file.")
     p.add_argument('context_file')
@@ -144,7 +171,7 @@ def main(args=None):
                          args, parser=parser)
 
         proddb = socompat.make_pointofs_hdf(fn1, fn2, dataset=args.dataset,
-                                            obs_list=tods)
+                                            obs_list=tods, hdf_relout=args.h5file)
         proddb.to_file(fn3)
 
     elif args.module == 'abscal':
@@ -212,11 +239,30 @@ def main(args=None):
                 for i, d in enumerate(aman.dets.vals):
                     rs.rows.append([d, aman['xi'][i], aman['eta'][i], aman['gamma'][i]])
                 io.metadata.write_dataset(rs, h, dset, overwrite=args.force)
-                db.add_entry({'dataset': dset, 'obs:pa': pa, 'obs:timestamp': (t0, t1)}, hdf_out)
+                db.add_entry({'dataset': dset, 'obs:pa': pa, 'obs:timestamp': (t0, t1)},
+                             args.h5file)
         db.to_file(fn1)
 
     elif args.module == 'cuts_release':
         socompat.process_cuts_release(args.release_file, output_dir=args.output_dir)
+
+    elif args.module == 'cuts_dir':
+        src_dir, src_prefix = relativify_paths(args.src_dir, args.output_dir)
+        if src_prefix != '':
+            print(f'output_dir and src_dir are both relative, so target files '
+                  f'will be prefixed with {src_prefix}')
+        fn1 = _checkfile(args.db_file, args, parser=parser)
+        db = socompat.make_cuts_db(src_dir, source_prefix=src_prefix)
+        db.to_file(fn1)
+
+    elif args.module == 'cal_dir':
+        src_dir, src_prefix = relativify_paths(args.src_dir, args.output_dir)
+        if src_prefix != '':
+            print(f'output_dir and src_dir are both relative, so target files '
+                  f'will be prefixed with {src_prefix}')
+        fn1 = _checkfile(args.db_file, args, parser=parser)
+        db = socompat.make_cal_db(src_dir, source_prefix=src_prefix)
+        db.to_file(fn1)
 
     elif args.module == 'context':
         fn1 = _checkfile('context.yaml', args)
