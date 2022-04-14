@@ -34,6 +34,8 @@ def get_tod(params, aman=None):
     if tod.data is None:
         # Hot-wire empty signal for no-dets case.
         tod.data = np.zeros((0, count), 'float32')
+    if tod.data.dtype != np.float32:
+        tod.data = tod.data.astype('float32')
 
     pa = 'pa' + tod.info.array[-1]
     axes = {
