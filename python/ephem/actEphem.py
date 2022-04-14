@@ -363,12 +363,16 @@ class dUT1Getter:
             import moby2
             user_config = moby2.util.get_user_config()
             filename = user_config.get('bulletin_A_settings')['filename']
-            #filename = '/scr/queequeg1/products/ishmael/Linux64/'\
-            #    'pslib/v1_5_2_2_1/share/pslib/finals_all.dat'
+        self.filename = filename
         data = numpy.loadtxt(filename, unpack=1)
         self.mjd0 = data[0][0]
+        assert(numpy.all(numpy.diff(data[0]) == 1))
         self.xa, self.yz, self.dUT1 = data[1:4]
     def __call__(self, times):
         idx = numpy.floor(ctime_to_mjd(times) - self.mjd0).astype('int')
+        if numpy.any(idx >= len(self.dUT1)):
+            raise RuntimeError(
+                "User requested dUT1 for MJD beyond end of dUT1 source file (%s)." %
+                self.filename)
         return self.dUT1[idx]
         
