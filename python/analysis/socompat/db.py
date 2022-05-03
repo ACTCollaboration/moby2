@@ -122,6 +122,7 @@ def make_obsdb(cat=None):
         'timestamp float',
         'pa string',
         'scode string',
+        'duration float',
         'obs_type string',
         'obs_detail string',
     ])
@@ -130,7 +131,8 @@ def make_obsdb(cat=None):
         row = cat[i]
         obs_id = row['tod_name']
         data = {
-            'timestamp': float(row['ctime'])
+            'timestamp': float(row['ctime']),
+            'duration': float(row['duration']),
         }
         data.update({k: row[k] for k in ['pa', 'obs_type', 'obs_detail', 'scode']})
         if row['obs_type'] == 'planet':
