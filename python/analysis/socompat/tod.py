@@ -137,15 +137,13 @@ def actpol_load_observation(db, obs_id, dets=None, samples=None,
         # Pass it in through an aman.
         aman = core.AxisManager(core.LabelAxis('dets', dets))
 
-    #To support moby2 filebases, the default prefix shall be '' --
-    #i.e. the user must either record clean basenames or full paths
-    #for this system or pass in a prefix explicitly.
-    if prefix is None:
-        prefix = ''
-
     start, end = 0, None
     if samples is not None:
         start, end = samples
+
+    # Put this in front of your basenames in obsfiledb if you want
+    # this loader to revert to using the filebase to find your TODs.
+    filebase_prefix = '/MOBY_FILEBASE/'
 
     # Use the db to get the filename.
     files_by_detset = db.get_files(obs_id, prefix=prefix)
@@ -153,6 +151,8 @@ def actpol_load_observation(db, obs_id, dets=None, samples=None,
     for detset, fileidx in files_by_detset.items():
         assert(len(fileidx) == 1)
         filename, sample_start, sample_stop = fileidx[0]
+        if filename.startswith(filebase_prefix):
+            filename = filename[len(filebase_prefix):]
         aman, tod = get_tod({'filename': filename,
                              'repair_pointing': True,
                              'read_data': (no_signal is not True),
