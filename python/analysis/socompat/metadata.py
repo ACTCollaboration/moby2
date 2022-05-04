@@ -28,7 +28,7 @@ def get_abscal_proddb(filename, dataset):
     """
 
     fin = h5py.File(filename, mode='r')
-    data = fin[dataset].value
+    data = fin[dataset][()]
 
     all_obs_id = sorted([str(x, 'ascii') for x in
                          list(set(list(data['tod_id'])))])
@@ -110,6 +110,29 @@ def load_act_cal(filename, pa=None):
     aman.wrap('cal', cal_in.cal, [(0, 'dets')])
     return aman
 
+def load_act_timeconst(filename, pa=None):
+    """Read ACT timeconstants file and return an AxisManager containing
+    the info.
+
+    The pa is needed to define the dets axis properly, but if passed
+    as None then the code will try to determine it by searching for a
+    standard ACT TOD basename in filename.
+
+    """
+    if pa is None:
+        _, _, _, ar = extract_basename(filename)
+        pa = 'pa' + ar[-1]
+
+    db = moby2.util.StructDB.from_column_file(
+        filename, [('det_uid', 0), ('tau_s', 1)])
+    det_names = ['%s_%04i' % (pa, u) for u in db['det_uid']]
+
+    aman = core.AxisManager(
+        core.LabelAxis('dets', det_names),
+    )
+
+    aman.wrap('timeconst', db['tau_s'], [(0, 'dets')])
+    return aman
 
 def load_detoffsets_file(position, polarization, pa=None):
     """Read ACT detector offsets + polarization angles files and return an
@@ -198,6 +221,9 @@ class ActCalLoader(ActLoader):
     def from_loadspec(self, index_line):
         return load_act_cal(index_line['filename'])
 
+class ActTimeconstLoader(ActLoader):
+    def from_loadspec(self, index_line):
+        return load_act_timeconst(index_line['filename'], pa=index_line.get('pa_hint'))
 
 class ActDetOfsLoader(ActLoader):
     def from_loadspec(self, index_line):
@@ -225,6 +251,7 @@ def register_loaders():
         'actpol_cuts': ActCutsLoader,
         'actpol_cal': ActCalLoader,
         'actpol_abscal': ActAbsCalLoader,
+        'actpol_timeconst': ActTimeconstLoader,
         'actpol_detofs': ActDetOfsLoader,
         'actpol_pointofs': ActPointOfsLoader,
     })

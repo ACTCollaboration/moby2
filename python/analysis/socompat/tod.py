@@ -2,6 +2,7 @@ import moby2
 from sotodlib import core
 
 import numpy as np
+import os
 
 __all__ = ['get_tod']
 
@@ -52,16 +53,17 @@ def get_tod(params, aman=None):
 
     del tod.data, tod.ctime
 
-    # Include a cal to remove readout filter gain.
+    # Include a cal to remove readout filter gain -- not needed if you
+    # deconvolve the readout filter directly.
     data.wrap('readout_filter_cal',
               np.ones(data.dets.count) / tod.info.mce_filter.gain(),
               [(0, 'dets')])
 
-    # Describe the filter -- this is already obsolete... use iir_params!
-    data.wrap('mce_filter_params',
-              np.array(tod.info.mce_filter.params))
-
-    iir_params = mce_to_iir(tod.info.mce_filter.params, tod.info.mce_filter.f_samp)
+    # Describe the readout filter in sotodlib language.
+    iir = mce_to_iir(tod.info.mce_filter.params, tod.info.mce_filter.f_samp)
+    iir_params = core.AxisManager()
+    for k, v in iir.items():
+        iir_params.wrap(k, v)
     data.wrap('iir_params', iir_params)
 
     flags = core.AxisManager(axes['samps'])
@@ -102,9 +104,11 @@ def mce_to_iir(p, f_mux):
     iir_params block suitable for use with sotodlib
     (tod_ops.filters.iir_filter).
 
+    Note the effective "DC gain" is included in these parameters and
+    does not need to be carried separately.
+
     Returns:
-      Array output with shape (3, n).  Polynomial coefficients are a =
-      output[0], b = output[1], and fscale = output[2][0].
+      dict with keys 'a', 'b', and 'fscale'.
 
     """
     K = 1./2**14
@@ -112,8 +116,8 @@ def mce_to_iir(p, f_mux):
     b11, b12, b21, b22, k1, k2 = [s*p for s,p in zip(scalars, p)]
     a = np.array([1., - b11 - b21, b11*b21 + b12 + b22, - b11 * b22 - b21 * b12, b12*b22])
     b = np.array([1., 4, 6, 4, 1]) / 2**(k1+k2)
-    fscale = b*0 + 1./f_mux
-    return np.array([a, b, fscale])
+    fscale = 1./f_mux
+    return {'a': a, 'b': b, 'fscale': fscale}
 
 
 def actpol_load_observation(db, obs_id, dets=None, samples=None,
@@ -134,15 +138,18 @@ def actpol_load_observation(db, obs_id, dets=None, samples=None,
         # Pass it in through an aman.
         aman = core.AxisManager(core.LabelAxis('dets', dets))
 
-    #To support moby2 filebases, the default prefix shall be '' --
-    #i.e. the user must either record clean basenames or full paths
-    #for this system or pass in a prefix explicitly.
-    if prefix is None:
-        prefix = ''
-
     start, end = 0, None
     if samples is not None:
         start, end = samples
+
+    # Put this in front of your basenames in obsfiledb if you want
+    # this loader to revert to using the filebase to find your TODs.
+    filebase_prefix = '/MOBY_FILEBASE/'
+
+    # zipped dirfile access can be absurdly slow on filesystems with
+    # bad random access.  Support copying the zip file to shared
+    # memory before opening; e.g. set MOBY2_TOD_STAGING_PATH=/dev/shm.
+    filecache_prefix = os.getenv('MOBY2_TOD_STAGING_PATH')
 
     # Use the db to get the filename.
     files_by_detset = db.get_files(obs_id, prefix=prefix)
@@ -150,11 +157,22 @@ def actpol_load_observation(db, obs_id, dets=None, samples=None,
     for detset, fileidx in files_by_detset.items():
         assert(len(fileidx) == 1)
         filename, sample_start, sample_stop = fileidx[0]
+        if filename.startswith(filebase_prefix):
+            filename = filename[len(filebase_prefix):]
+
+        if filecache_prefix:
+            local_copy = os.path.join(filecache_prefix,
+                                      os.path.split(filename)[1])
+            os.system('cp "%s" "%s"' % (filename, local_copy))
+            filename = local_copy
+
         aman, tod = get_tod({'filename': filename,
                              'repair_pointing': True,
                              'read_data': (no_signal is not True),
                              'start': start,
                              'end': end}, aman=aman)
 
+        if filecache_prefix:
+            os.remove(local_copy)
     return aman
 
