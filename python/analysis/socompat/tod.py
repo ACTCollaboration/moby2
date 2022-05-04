@@ -2,6 +2,7 @@ import moby2
 from sotodlib import core
 
 import numpy as np
+import os
 
 __all__ = ['get_tod']
 
@@ -145,6 +146,11 @@ def actpol_load_observation(db, obs_id, dets=None, samples=None,
     # this loader to revert to using the filebase to find your TODs.
     filebase_prefix = '/MOBY_FILEBASE/'
 
+    # zipped dirfile access can be absurdly slow on filesystems with
+    # bad random access.  Support copying the zip file to shared
+    # memory before opening; e.g. set MOBY2_TOD_STAGING_PATH=/dev/shm.
+    filecache_prefix = os.getenv('MOBY2_TOD_STAGING_PATH')
+
     # Use the db to get the filename.
     files_by_detset = db.get_files(obs_id, prefix=prefix)
     assert(len(files_by_detset) == 1)
@@ -153,11 +159,20 @@ def actpol_load_observation(db, obs_id, dets=None, samples=None,
         filename, sample_start, sample_stop = fileidx[0]
         if filename.startswith(filebase_prefix):
             filename = filename[len(filebase_prefix):]
+
+        if filecache_prefix:
+            local_copy = os.path.join(filecache_prefix,
+                                      os.path.split(filename)[1])
+            os.system('cp "%s" "%s"' % (filename, local_copy))
+            filename = local_copy
+
         aman, tod = get_tod({'filename': filename,
                              'repair_pointing': True,
                              'read_data': (no_signal is not True),
                              'start': start,
                              'end': end}, aman=aman)
 
+        if filecache_prefix:
+            os.remove(local_copy)
     return aman
 
