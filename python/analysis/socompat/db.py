@@ -125,16 +125,19 @@ def make_obsdb(cat=None):
         'duration float',
         'obs_type string',
         'obs_detail string',
+        'pwv float',
+        'pwv_source string',
     ])
     for i in cat['tod_name'].argsort():
         tags = []
         row = cat[i]
         obs_id = row['tod_name']
-        data = {
-            'timestamp': float(row['ctime']),
-            'duration': float(row['duration']),
-        }
-        data.update({k: row[k] for k in ['pa', 'obs_type', 'obs_detail', 'scode']})
+        data = {'timestamp': float(row['ctime'])}
+        data.update({k: float(row[k]) for k in [
+            'duration', 'pwv']})
+        data.update({k: row[k] for k in [
+            'pa', 'obs_type', 'obs_detail', 'scode',
+            'pwv_source']})
         if row['obs_type'] == 'planet':
             tags.extend(['planet', row['obs_detail']])
         obsdb.update_obs(obs_id, data=data, tags=tags, commit=False)
