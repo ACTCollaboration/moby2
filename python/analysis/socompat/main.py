@@ -244,7 +244,7 @@ def main(args=None):
                     os.path.join(spec['prefix'], pos_file),
                     os.path.join(spec['prefix'], pol_file), pa=pa)
                 # Convert to ResultSet and write out.
-                rs = metadata.ResultSet(keys=['dets:name', 'xi', 'eta', 'gamma'])
+                rs = metadata.ResultSet(keys=['dets:readout_id', 'xi', 'eta', 'gamma'])
                 for i, d in enumerate(aman.dets.vals):
                     rs.rows.append([d, aman['xi'][i], aman['eta'][i], aman['gamma'][i]])
                 io.metadata.write_dataset(rs, h, dset, overwrite=args.force)

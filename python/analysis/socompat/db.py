@@ -33,7 +33,7 @@ def make_detdb():
     """
     db = metadata.DetDb()
     db.create_table('base', [
-        "`name` varchar(8)",
+        "`readout_id` varchar(16)",
         "`array_name` varchar(8)",
         "`old_det_id` integer",
         "`band` varchar(8)",
@@ -97,7 +97,7 @@ def make_detdb():
             data = {dest: adata[src][u].tolist() for src, dest in base_map}
             data['old_det_id'] = u.tolist()
             data['band'] = 'f%03i' % float(adata['nom_freq'][u])
-            data['name'] = new_uid
+            data['readout_id'] = new_uid
             data.update(info)
             db.add_props('base', new_uid, **data,
                          commit=False)
