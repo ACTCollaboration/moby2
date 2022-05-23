@@ -31,6 +31,11 @@ def load_tod_list(filename, fmt=None):
         tod_id = db['tod_id']
     return tod_id
 
+def get_obs_catalog(catalog):
+    if catalog:
+        return moby2.util.StructDB.from_fits_table(catalog)
+    return moby2.scripting.get_obs_catalog()
+
 def relativify_paths(srcdir, odir):
     """Returns (srcdir_from_here, srcdir_relpath).  If srcdir is and odir
     are both relative, then srcdir_from_here is simply srcdir but
@@ -60,7 +65,11 @@ def get_parser():
                                "Module to activate \"%(prog)s {module} -h\" for more help")
     
     p = sp.add_parser('obsdb', help="Write out an obsdb obsfiledb.")
+    p.add_argument('--catalog', help="Alternative obs_catalog (FITS) to use.")
+
     p = sp.add_parser('obsfiledb', help="Write out an obsfiledb.")
+    p.add_argument('--catalog', help="Alternative obs_catalog (FITS) to use.")
+
     p = sp.add_parser('detdb', help="Write out a detdb.")
 
     p = sp.add_parser('pointofs', help="Write out a per-TOD pointofs archive.")
@@ -127,7 +136,7 @@ def main(args=None):
 
     elif args.module == 'obsdb':
         fn1 = _checkfile('obsdb.sqlite', args, parser=parser)
-        cat = moby2.scripting.get_obs_catalog()
+        cat = get_obs_catalog(args.catalog)
         if args.tod_list:
             tods = load_tod_list(args.tod_list)
             print(f'Restricting TOD list to {len(tods)} items from {args.tod_list}...')
@@ -142,7 +151,7 @@ def main(args=None):
 
     elif args.module == 'obsfiledb':
         fn1 = _checkfile('obsfiledb.sqlite', args)
-        cat = moby2.scripting.get_obs_catalog()
+        cat = get_obs_catalog(args.catalog)
         if args.tod_list:
             tods = load_tod_list(args.tod_list)
             print(f'Restricting TOD list to {len(tods)} items from {args.tod_list}...')
