@@ -33,7 +33,7 @@ def make_detdb():
     """
     db = metadata.DetDb()
     db.create_table('base', [
-        "`name` varchar(8)",
+        "`readout_id` varchar(16)",
         "`array_name` varchar(8)",
         "`old_det_id` integer",
         "`band` varchar(8)",
@@ -97,7 +97,7 @@ def make_detdb():
             data = {dest: adata[src][u].tolist() for src, dest in base_map}
             data['old_det_id'] = u.tolist()
             data['band'] = 'f%03i' % float(adata['nom_freq'][u])
-            data['name'] = new_uid
+            data['readout_id'] = new_uid
             data.update(info)
             db.add_props('base', new_uid, **data,
                          commit=False)
@@ -125,16 +125,19 @@ def make_obsdb(cat=None):
         'duration float',
         'obs_type string',
         'obs_detail string',
+        'pwv float',
+        'pwv_source string',
     ])
     for i in cat['tod_name'].argsort():
         tags = []
         row = cat[i]
         obs_id = row['tod_name']
-        data = {
-            'timestamp': float(row['ctime']),
-            'duration': float(row['duration']),
-        }
-        data.update({k: row[k] for k in ['pa', 'obs_type', 'obs_detail', 'scode']})
+        data = {'timestamp': float(row['ctime'])}
+        data.update({k: float(row[k]) for k in [
+            'duration', 'pwv']})
+        data.update({k: row[k] for k in [
+            'pa', 'obs_type', 'obs_detail', 'scode',
+            'pwv_source']})
         if row['obs_type'] == 'planet':
             tags.extend(['planet', row['obs_detail']])
         obsdb.update_obs(obs_id, data=data, tags=tags, commit=False)
@@ -248,6 +251,31 @@ def make_abscal_hdf(offsets_file, hdf_out, dataset='abscal'):
 
 def _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, re_suffix,
                          source_prefix):
+    """Scan a depot for cuts or cal results, and create or update a
+    ManifestDb.
+
+    Args:
+      root_dir (str): Base directory to scan.  Any file in this tree
+        matching the pattern will be kept.
+      loader (str): String to set 'loader' field to in the output db.
+      restrictions (dict): Additional restrictions to set on the
+        result.  This will affect the scheme (additional exact match
+        fields are added for each item).  If you want anything here
+        you probably want {'dets:band': 'f150'}.
+      db_in (ManifestDb or None): If this is passed in, it will get
+        updated by this scan.  Any items already in the Db will not be
+        updated.  If this is passed in as None, a new Db is created.
+      re_suffix (str): The suffix to look for when matching results.
+        Probably '.cuts' or '.cal'.
+      source_prefix (str): Having found files in root_dir, this prefix
+        is prepended to the results before storing them in the Db.
+        (This is used so that paths are relative to some other
+        interesting thing, such as the ManifestDb.)
+
+    Returns:
+      The updated (or newly created) ManifestDb.
+
+    """
     scheme = metadata.ManifestScheme()\
              .add_exact_match('obs:obs_id')\
              .add_data_field('loader')
@@ -256,23 +284,19 @@ def _cuts_and_cal_helper(root_dir, loader, restrictions, db_in, re_suffix,
         scheme.add_data_field(k)
     if db_in is None:
         db = metadata.ManifestDb(scheme=scheme)
-        ignore = []
     else:
         db = db_in
-        ignore = [r[0] for r in db.conn.execute('select distinct `obs:obs_id` from map')]
     product_re = re.compile('(%s)%s' % (TOD_ID_PAT, re_suffix))
     entry = dict(restrictions)
     entry['loader'] = loader
     for root, dirs, files in os.walk(root_dir):
         for f in files:
             m = product_re.fullmatch(f)
-            print(f, m)
             if m is None:
                 continue
             entry['obs:obs_id'] = m.group(1)
-            if entry['obs:obs_id'] in ignore:
-                continue
-            db.add_entry(entry, filename=os.path.join(source_prefix, root, f))
+            db.add_entry(entry, filename=os.path.join(source_prefix, root, f),
+                         replace=True)
     return db
 
 
