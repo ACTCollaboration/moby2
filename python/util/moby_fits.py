@@ -40,7 +40,7 @@ numpy_to_fits = [
     (np.float32, 'E', None),
     (np.float64, 'D', None),
     # Hack for bools; store as byte.
-    (np.bool,    'B', None),
+    (np.bool_,    'B', None),
 ]
 
 _numpy_to_fits = {
