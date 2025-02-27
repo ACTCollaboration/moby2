@@ -1,8 +1,7 @@
 from __future__ import print_function
 
-from distutils.core import setup, Extension
+from setuptools import setup, Extension
 
-VERSION = '0.1'
 
 import glob
 import sys
@@ -44,26 +43,24 @@ analysis_modules =  [
 if sys.version_info.major >= 3:
     analysis_modules.append('socompat')
 
-setup (name = 'moby2',
-       version = VERSION,
-       description = 'ACTpol support',
-       package_dir = {'moby2': 'python'},
-       ext_modules = [module1],
-       scripts = scripts,
-       packages = (
-           ['moby2',
-            'moby2.aux_data',
-            'moby2.detectors',
-            'moby2.ephem',
-            'moby2.instruments',
-            'moby2.instruments.actpol',
-            'moby2.instruments.mbac',
-            'moby2.mapping',
-            'moby2.pointing',
-            'moby2.scripting',
-            'moby2.tod',
-            'moby2.util',
-            'moby2.analysis'] +
-           ['moby2.analysis.%s' % p for p in analysis_modules]
-       )
-   )
+setup(name = 'moby2',
+    package_dir = {'moby2': 'python'},
+    ext_modules = [module1],
+    scripts = scripts,
+    packages = (
+        ['moby2',
+        'moby2.aux_data',
+        'moby2.detectors',
+        'moby2.ephem',
+        'moby2.instruments',
+        'moby2.instruments.actpol',
+        'moby2.instruments.mbac',
+        'moby2.mapping',
+        'moby2.pointing',
+        'moby2.scripting',
+        'moby2.tod',
+        'moby2.util',
+        'moby2.analysis'] +
+        ['moby2.analysis.%s' % p for p in analysis_modules]
+    )
+)
