@@ -1,0 +1,41 @@
+[build-system]
+requires = [
+    "setuptools",
+    "wheel",
+    "numpy",
+    # Astropy depends on numpy 1.x with python-3.9.  Place
+    # a build-time dependency here so that we build with a
+    # compatible version of numpy.  Remove this after dropping
+    # python-3.9 support.
+    "astropy",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moby2"
+readme = "README.rst"
+description = "ACTpol support"
+urls = {source = "https://github.com/ACTCollaboration/moby2"}
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+dependencies = [
+    "future",
+    "numpy",
+    "scipy",
+    "astropy",
+    "matplotlib",
+    "ephem",
+    "pytz",
+]
+version = "0.1"
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Topic :: Scientific/Engineering :: Astronomy",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]

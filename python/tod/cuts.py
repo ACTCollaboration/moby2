@@ -693,7 +693,7 @@ def fill_cuts(tod=None, cuts=None, data=None,
     for deti in det_list:
         mask = cuts.cuts[deti].get_mask()
         offset = cuts.sample_offset - si
-        total_mask = np.ones(nsamps, dtype=np.bool)
+        total_mask = np.ones(nsamps, dtype=bool)
         total_mask[max(0,offset):min(nsamps,cuts.nsamps+offset)] = \
             mask[max(0,-offset):min(nsamps-offset,cuts.nsamps)]
         cuts_list = CutsVector.from_mask(total_mask)

@@ -40,9 +40,10 @@ int extract_float32_uint32(float *dest, uint32_t *src, long n,
 
 static PyTypeObject
 ptrobjType = {
-    PyObject_HEAD_INIT(NULL)
 #if PY_MAJOR_VERSION >= 3
+    PyVarObject_HEAD_INIT(NULL, 0)
 #else
+    PyObject_HEAD_INIT(NULL)
     0,                         /* ob_size */
 #endif
     "ptrobj",                  /* tp_name */
